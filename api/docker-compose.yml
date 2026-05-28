@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: athletehub-postgres
+    environment:
+      POSTGRES_DB: athletehub
+      POSTGRES_USER: athletehub_user
+      POSTGRES_PASSWORD: athletehub_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - athletehub-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U athletehub_user -d athletehub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  athletehub-network:
+    driver: bridge
