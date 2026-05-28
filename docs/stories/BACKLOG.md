@@ -52,7 +52,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 |----|-------|--------|-----------|
 | AH-010 | Schema: users, roles, refresh_tokens (Flyway) | DONE | AH-004 |
 | AH-011 | Register (email+password), password hashing, /me read | DONE | AH-010 |
-| AH-012 | Login + JWT issuance, JwtUtil/Filter, SecurityConfig | TODO | AH-011 |
+| AH-012 | Login + JWT issuance, JwtUtil/Filter, SecurityConfig | DONE | AH-011 |
 | AH-013 | Refresh-token rotation + logout | TODO | AH-012 |
 | AH-014 | Password reset via email (GreenMail-tested) | TODO | AH-012 |
 | AH-015 | Social login (Apple, Google) OAuth2 | TODO | AH-012 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 6 done / 47.
+**Progress:** 7 done / 47.
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -180,5 +180,29 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
   - **API path convention (mirroring lotuga):** `/api/auth/...` and `/api/me`
     (no `/v1` prefix yet); 04-api-design.md's example `/v1` paths are
     deferred until we actually need versioning.
-  - **Next:** AH-012 (login + JWT issuance + JwtAuthenticationFilter + real
-    `SecurityConfig` wiring).
+  - **AH-012 DONE.** Login + JWT issuance, full `security/` infrastructure
+    (`JwtUtil`, `UserPrincipal`, `CustomUserDetailsService`,
+    `JwtAuthenticationFilter`), real `SecurityConfig` wiring
+    (`DaoAuthenticationProvider`, `AuthenticationManager`, explicit
+    `AuthenticationEntryPoint` + `AccessDeniedHandler` writing the `ApiResponse`
+    envelope on 401/403). Refresh tokens: `RefreshToken` entity +
+    `RefreshTokenRepository` + `RefreshTokenService` (SecureRandom + SHA-256
+    hash; never store the plain value). DTOs: `LoginRequest`, `AuthResponse`
+    (accessToken, refreshToken, accessTokenExpiresIn, tokenType=Bearer, user).
+    Wrong-password / unknown-email surface as a domain
+    `InvalidCredentialsException` (not Spring's `BadCredentialsException`),
+    handled by the global advice with a stable `INVALID_CREDENTIALS` code.
+    `LoginIT` 6/6: happy path with persisted refresh-token hash, case-
+    insensitive email, 401 wrong password, 401 unknown email (no enumeration),
+    401 `/api/me` without token, 200 `/api/me` with valid access token.
+  - **Footnote on a sharp edge:** `AbstractIntegrationTest` had to switch
+    from `SimpleClientHttpRequestFactory` to `JdkClientHttpRequestFactory` —
+    the older factory uses `HttpURLConnection`, whose built-in HTTP-auth state
+    machine quietly consumes the body of 401 responses, making it look as if
+    the server returned an empty 401. Real HTTP clients (Flutter's `http`
+    package, browsers, curl) don't have this quirk; only the test harness was
+    affected. Also added the `spring-boot-flyway` module (Spring Boot 4
+    modularized auto-configuration per feature).
+  - **Next:** AH-013 (refresh-token rotation + logout) — extend
+    `RefreshTokenService` with rotate/validate/revoke + `POST
+    /api/auth/token/refresh` and `POST /api/auth/logout`.

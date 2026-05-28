@@ -9,7 +9,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.ClientHttpResponse;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -18,20 +18,21 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 
-import java.io.IOException;
-import java.net.HttpURLConnection;
-
 /**
  * Base class for backend integration tests (*IT, run by Failsafe in `verify`).
  *
  * <p>Boots the full Spring context on a random port against a real PostgreSQL
  * (Testcontainers) so Flyway migrations run exactly as in production. Subclasses
  * get a {@link RestTemplate} rooted at the running port that <em>never</em>
- * follows redirects and <em>never</em> throws on 4xx/5xx — negative-path tests
- * assert on the returned status instead.
+ * throws on 4xx/5xx — negative-path tests assert on the returned status.
  *
- * <p>Requires Docker to be running. Mirrors lotuga's pattern; as features land,
- * extend this base with GreenMail / WireMock / auth helpers.
+ * <p>The HTTP client is {@link JdkClientHttpRequestFactory} (Java's
+ * {@code java.net.http.HttpClient}), <em>not</em> the older
+ * {@code SimpleClientHttpRequestFactory} (which wraps {@code HttpURLConnection}
+ * and has special handling for 401 responses — it can swallow the body during
+ * its authentication state machine, leading to mysterious null bodies).
+ *
+ * <p>Requires Docker to be running.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("it")
@@ -62,27 +63,17 @@ public abstract class AbstractIntegrationTest {
     protected ObjectMapper objectMapper;
 
     /** RestTemplate rooted at the running server; never throws on 4xx/5xx so
-     *  tests can assert on status. Also does not follow redirects (otherwise an
-     *  unauthenticated request to a protected endpoint could land on a 200 page
-     *  and mask the actual 401/302). */
+     *  tests can assert on status. */
     protected RestTemplate rest;
 
     @BeforeEach
     void setUpRest() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory() {
-            @Override
-            protected void prepareConnection(HttpURLConnection connection, String httpMethod)
-                    throws IOException {
-                super.prepareConnection(connection, httpMethod);
-                connection.setInstanceFollowRedirects(false);
-            }
-        };
-        rest = new RestTemplate(factory);
+        rest = new RestTemplate(new JdkClientHttpRequestFactory());
         rest.setUriTemplateHandler(new DefaultUriBuilderFactory("http://localhost:" + port));
         rest.setErrorHandler(new DefaultResponseErrorHandler() {
             @Override
             public boolean hasError(ClientHttpResponse response) {
-                return false; // surface the status to the test instead of throwing
+                return false;
             }
         });
     }
