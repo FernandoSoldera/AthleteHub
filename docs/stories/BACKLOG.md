@@ -51,7 +51,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
 | AH-010 | Schema: users, roles, refresh_tokens (Flyway) | DONE | AH-004 |
-| AH-011 | Register (email+password), password hashing, /me read | TODO | AH-010 |
+| AH-011 | Register (email+password), password hashing, /me read | DONE | AH-010 |
 | AH-012 | Login + JWT issuance, JwtUtil/Filter, SecurityConfig | TODO | AH-011 |
 | AH-013 | Refresh-token rotation + logout | TODO | AH-012 |
 | AH-014 | Password reset via email (GreenMail-tested) | TODO | AH-012 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 5 done / 47.
+**Progress:** 6 done / 47.
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -158,4 +158,27 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     now uses a plain `RestTemplate` configured to not follow redirects and not
     throw on 4xx/5xx — exactly lotuga's pattern.
   - **AH-002, AH-004, AH-010 → DONE.** Epic 0 fully closed.
-  - **Next:** AH-011 (register endpoint + `/me`).
+  - **AH-011 DONE.** `User` entity + `UserRepository`; `AuthService.register`
+    normalizes email/handle to lowercase, hashes with BCrypt, grants `ATHLETE`
+    role; `POST /api/auth/register` → `201` + `UserDto`; duplicate email or
+    handle → `409` (new `ConflictException` + handler) with stable
+    `MessageCode` (EMAIL_ALREADY_REGISTERED / HANDLE_ALREADY_TAKEN);
+    `GET /api/me` returns the authenticated profile (testable once AH-012
+    wires the JWT filter). Verified: `AuthServiceTest` 3/3 (Mockito);
+    `RegisterIT` 4/4 (Testcontainers + Flyway: happy, 409 dup-email
+    case-insensitive, 409 dup-handle, 400 validation).
+  - **Latent fix discovered while landing AH-011:** Spring Boot 4 split
+    auto-configuration into per-feature modules. Without
+    `org.springframework.boot:spring-boot-flyway`, `FlywayAutoConfiguration`
+    isn't present and migrations *never* run. The previous "verification" of
+    AH-002/004/010 was actually only proving Spring Boot starts — SmokeIT
+    only hits `/actuator/health` and so didn't notice. The new dep is now in
+    `api/pom.xml`; Flyway logs confirm both migrations apply on every test
+    boot. **Lesson:** every Boot 4 feature needs its `spring-boot-<feature>`
+    module pulled in (most starters do this transitively; raw library deps
+    like `flyway-core` do not).
+  - **API path convention (mirroring lotuga):** `/api/auth/...` and `/api/me`
+    (no `/v1` prefix yet); 04-api-design.md's example `/v1` paths are
+    deferred until we actually need versioning.
+  - **Next:** AH-012 (login + JWT issuance + JwtAuthenticationFilter + real
+    `SecurityConfig` wiring).

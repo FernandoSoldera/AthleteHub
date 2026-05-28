@@ -83,6 +83,12 @@
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-database-postgresql</artifactId>
 		</dependency>
+		<!-- Spring Boot 4 split per-feature autoconfig into separate modules; this
+		     one provides FlywayAutoConfiguration (no longer in spring-boot-autoconfigure). -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-flyway</artifactId>
+		</dependency>
 
 		<!-- JWT (used from EPIC 1) -->
 		<dependency>
