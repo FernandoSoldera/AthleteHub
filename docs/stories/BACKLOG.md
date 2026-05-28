@@ -57,7 +57,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-014 | Password reset via email (GreenMail-tested) | DONE | AH-012 |
 | AH-015 | Social login (Apple, Google) OAuth2 | DONE | AH-012 |
 | AH-016 | Role switch (athlete/coach) + profile update | DONE | AH-011 |
-| AH-017 | Client: auth screens, secure storage, http_interceptor, auth_api_service | TODO | AH-012, AH-003 |
+| AH-017 | Client: auth screens, secure storage, http_interceptor, auth_api_service | DONE | AH-012, AH-003 |
 
 ### EPIC 2 — Social graph & profile · [epic-2-social-profile.md](epic-2-social-profile.md)
 | ID | Story | Status | Depends on |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 11 done / 47.
+**Progress:** 12 done / 47. **Epic 1 fully closed.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -268,7 +268,35 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     unauthenticated 401 on both PATCH and switch, switch to COACH grants the
     role and persists it, switch to ATHLETE is a no-op when already an
     athlete.
-  - **Epic 1 backend is fully closed.** Only AH-017 remains (Flutter auth
-    screens + secure storage + http_interceptor with refresh + auth_api_service).
-  - **Next:** **AH-017 — client auth screens** (Flutter side). After that,
-    Epic 2 (social graph & profile) starts the backend domain work proper.
+  - **AH-017 DONE.** Flutter auth flow lights up the backend.
+    `SecureStorageService` (Keychain / EncryptedSharedPrefs) holds access +
+    refresh + cached user JSON. `HttpInterceptor` attaches `Authorization:
+    Bearer …`, on 401 with a token does a single refresh-and-retry via raw
+    `http` (no recursion), and on refresh failure clears local state and
+    fires a global `onUnauthorized` callback so `main.dart` can route to
+    login. `AuthApiService` covers register / login / oauth / logout / forgot /
+    reset and throws `ApiException(code, message, fieldErrors)` on non-2xx
+    so screens can map stable codes to localized strings. Screens:
+    `LoginScreen` (combined sign-in / create-account with a SegmentedButton,
+    matching the original `SignInScreen` handoff — gradient logo, "Train.
+    Track. Evolve." headline with accent on "Evolve.", form-level error
+    text); `ForgotPasswordScreen`; `ResetPasswordScreen` (6-char hex pattern
+    matching backend issuance). `main.dart` got a `navigatorKey` (used by
+    `HttpInterceptor.onUnauthorized`) and an `_AuthGate` that reads
+    `hasSession()` on cold start and routes to `MainShell` or `LoginScreen`.
+    OAuth social buttons render but stay disabled until the native flow
+    lands. Verified: `flutter analyze` clean (no issues); `flutter test` 2/2
+    green (login renders sign-in mode with email + password; toggling to
+    create-account reveals full name + handle). Two sharp edges:
+      • `pumpAndSettle` doesn't terminate while a `CircularProgressIndicator`
+        animates — the original cold-start widget test (booting via `main()`
+        through the auth-gate spinner) hung. Test the screens directly;
+        leave end-to-end boot to `integration_test/`.
+      • `flutter_secure_storage` calls native plugin code that isn't wired in
+        the unit-test environment, so anything that touches the gate
+        belongs in `integration_test/`, not `test/`.
+  - **Epic 1 is fully closed.** All eight stories (AH-010..017) are DONE; full
+    athlete-auth API + Flutter auth flow + token persistence + automatic
+    refresh + four screens.
+  - **Next:** **EPIC 2 — Social graph & profile** starting with AH-020
+    (follows + user_counters schema).
