@@ -20,5 +20,8 @@ public enum MessageCode {
     HANDLE_ALREADY_TAKEN,
 
     // Identity / tokens (EPIC 1 — AH-013)
-    INVALID_REFRESH_TOKEN
+    INVALID_REFRESH_TOKEN,
+
+    // Identity / password reset (EPIC 1 — AH-014)
+    INVALID_RESET_CODE
 }

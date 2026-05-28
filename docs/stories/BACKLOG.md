@@ -54,7 +54,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-011 | Register (email+password), password hashing, /me read | DONE | AH-010 |
 | AH-012 | Login + JWT issuance, JwtUtil/Filter, SecurityConfig | DONE | AH-011 |
 | AH-013 | Refresh-token rotation + logout | DONE | AH-012 |
-| AH-014 | Password reset via email (GreenMail-tested) | TODO | AH-012 |
+| AH-014 | Password reset via email (GreenMail-tested) | DONE | AH-012 |
 | AH-015 | Social login (Apple, Google) OAuth2 | TODO | AH-012 |
 | AH-016 | Role switch (athlete/coach) + profile update | TODO | AH-011 |
 | AH-017 | Client: auth screens, secure storage, http_interceptor, auth_api_service | TODO | AH-012, AH-003 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 8 done / 47.
+**Progress:** 9 done / 47.
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -219,4 +219,26 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
         InvalidRefreshTokenException.class)`. With default REQUIRED propagation
         the inner `rotate`'s rollback rules are ignored; without this on the
         outer, the reuse-detection revocations would roll back.
-  - **Next:** AH-014 (password reset via email — Spring Mail + GreenMail IT).
+  - **AH-014 DONE.** Password reset via email. New `password_reset_tokens`
+    schema (Flyway `V20260528120000`). `PasswordResetService` issues 6-char
+    hex codes (SHA-256-hashed at rest, plain value emailed and discarded),
+    `consumeCode` enforces single-use + 15-min expiry — unknown / used /
+    expired all collapse into one `INVALID_RESET_CODE` (so brute-forcing
+    learns nothing). `EmailService` wraps `JavaMailSender` (plain text MVP).
+    `AuthService.forgotPassword` never reveals whether the email exists
+    (always 202, mail errors logged + swallowed). `AbstractIntegrationTest`
+    now starts GreenMail on the standard test SMTP port (3025) and resets
+    its mailbox per test; `application-it.properties` overrides
+    auth/STARTTLS to off so the in-process server can accept. `PasswordResetIT`
+    5/5: happy path reads the code straight out of the mailbox and flips the
+    password; unknown-email returns 202 with zero emails sent; same-code
+    reuse, unknown code, and expired code each return 400 +
+    `INVALID_RESET_CODE`. Two sharp edges:
+      • `app.mail.from` defaulted to empty string in `application.properties`
+        (`${MAIL_FROM:}`) — `JavaMailSender` then can't parse the From and
+        raises `MailParseException`. Sensible default is now
+        `noreply@athletehub.app`.
+      • `spring.mail.properties.mail.smtp.starttls.required=true` is the
+        right prod setting, but GreenMail doesn't negotiate STARTTLS — the
+        `it` profile overrides auth + STARTTLS to off.
+  - **Next:** AH-015 (OAuth2 social login — Google + Apple).

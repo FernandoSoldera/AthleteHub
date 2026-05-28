@@ -12,6 +12,7 @@ import com.example.athletehub.model.User;
 import com.example.athletehub.repository.UserRepository;
 import com.example.athletehub.security.JwtUtil;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,18 +22,20 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Identity use cases. AH-011 covers email/password registration; AH-012 adds
- * login + JWT issuance; AH-013 adds refresh-token rotation + logout. Password
- * reset (AH-014) and OAuth (AH-015) follow.
+ * Identity use cases. AH-011 register, AH-012 login + JWT, AH-013 refresh +
+ * logout, AH-014 password reset. OAuth (AH-015) follows.
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AuthService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final RefreshTokenService refreshTokenService;
+    private final PasswordResetService passwordResetService;
+    private final EmailService emailService;
 
     @Transactional
     public UserDto register(SignupRequest req) {
@@ -76,15 +79,12 @@ public class AuthService {
     }
 
     /**
-     * Rotate the presented refresh token. Issues a fresh access + refresh
-     * token pair tied to the same user; the presented refresh token is
-     * revoked. See {@link RefreshTokenService#rotate} for reuse-detection
-     * semantics.
+     * Rotate the presented refresh token (see {@link RefreshTokenService#rotate}).
      *
      * <p>{@code noRollbackFor} must be set on this <em>outer</em> transaction
-     * because rotate's joined tx has its rollback rules ignored under default
+     * because the joined inner tx has its rollback rules ignored under default
      * (REQUIRED) propagation. Without this, the reuse-detection revocations
-     * inside rotate would be rolled back when it throws.
+     * inside rotate would be rolled back.
      */
     @Transactional(noRollbackFor = com.example.athletehub.exception.InvalidRefreshTokenException.class)
     public AuthResponse refresh(String plainRefreshToken, String deviceInfo) {
@@ -105,6 +105,35 @@ public class AuthService {
     @Transactional
     public void logout(String plainRefreshToken) {
         refreshTokenService.revoke(plainRefreshToken);
+    }
+
+    /**
+     * Start a password-reset flow. The response is identical whether the email
+     * exists or not (no account enumeration). If the email exists, a code is
+     * issued and emailed; otherwise we do nothing. Mail-send errors are logged
+     * and swallowed so they don't leak account existence via timing or status.
+     */
+    public void forgotPassword(String email) {
+        String normalized = email.trim().toLowerCase(Locale.ROOT);
+        userRepository.findByEmail(normalized).ifPresent(user -> {
+            try {
+                String code = passwordResetService.issueCodeForUser(user);
+                emailService.sendPasswordResetCode(normalized, code);
+            } catch (Exception ex) {
+                log.warn("Failed to deliver password-reset email for {}", normalized, ex);
+            }
+        });
+    }
+
+    /**
+     * Consume a reset code and set a new password. The code is single-use:
+     * a second call with the same code fails.
+     */
+    @Transactional
+    public void resetPassword(String code, String newPassword) {
+        User user = passwordResetService.consumeCode(code);
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────

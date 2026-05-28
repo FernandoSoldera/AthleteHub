@@ -1,8 +1,10 @@
 package com.example.athletehub.controller;
 
 import com.example.athletehub.dto.AuthResponse;
+import com.example.athletehub.dto.ForgotPasswordRequest;
 import com.example.athletehub.dto.LoginRequest;
 import com.example.athletehub.dto.RefreshTokenRequest;
+import com.example.athletehub.dto.ResetPasswordRequest;
 import com.example.athletehub.dto.SignupRequest;
 import com.example.athletehub.dto.UserDto;
 import com.example.athletehub.service.AuthService;
@@ -18,9 +20,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Public auth endpoints. The path prefix {@code /api/auth/**} is permitted by
- * {@code SecurityConfig}. Password reset (AH-014) and OAuth (AH-015) follow.
- * Invalid credentials / invalid refresh tokens surface as domain exceptions
- * translated to 401 JSON envelopes by the global handler.
+ * {@code SecurityConfig}. OAuth (AH-015) follows. Domain errors surface via
+ * the global advice as 401/400/409 JSON envelopes.
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -51,5 +52,22 @@ public class AuthController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logout(@Valid @RequestBody RefreshTokenRequest request) {
         authService.logout(request.getRefreshToken());
+    }
+
+    /**
+     * Start a password reset. Always returns 202 — we never reveal whether the
+     * email exists (no account enumeration).
+     */
+    @PostMapping("/password/forgot")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public void forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        authService.forgotPassword(request.getEmail());
+    }
+
+    /** Consume a reset code and set a new password. Single-use. */
+    @PostMapping("/password/reset")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request.getCode(), request.getPassword());
     }
 }
