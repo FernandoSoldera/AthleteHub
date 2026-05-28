@@ -23,5 +23,8 @@ public enum MessageCode {
     INVALID_REFRESH_TOKEN,
 
     // Identity / password reset (EPIC 1 — AH-014)
-    INVALID_RESET_CODE
+    INVALID_RESET_CODE,
+
+    // Identity / social login (EPIC 1 — AH-015)
+    INVALID_OAUTH_TOKEN
 }

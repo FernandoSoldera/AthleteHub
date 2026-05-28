@@ -55,7 +55,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-012 | Login + JWT issuance, JwtUtil/Filter, SecurityConfig | DONE | AH-011 |
 | AH-013 | Refresh-token rotation + logout | DONE | AH-012 |
 | AH-014 | Password reset via email (GreenMail-tested) | DONE | AH-012 |
-| AH-015 | Social login (Apple, Google) OAuth2 | TODO | AH-012 |
+| AH-015 | Social login (Apple, Google) OAuth2 | DONE | AH-012 |
 | AH-016 | Role switch (athlete/coach) + profile update | TODO | AH-011 |
 | AH-017 | Client: auth screens, secure storage, http_interceptor, auth_api_service | TODO | AH-012, AH-003 |
 
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 9 done / 47.
+**Progress:** 10 done / 47.
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -241,4 +241,22 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
       • `spring.mail.properties.mail.smtp.starttls.required=true` is the
         right prod setting, but GreenMail doesn't negotiate STARTTLS — the
         `it` profile overrides auth + STARTTLS to off.
-  - **Next:** AH-015 (OAuth2 social login — Google + Apple).
+  - **AH-015 DONE.** OAuth2 social login (Google + Apple), mobile-app-driven:
+    the app does the native OAuth dance and POSTs the resulting ID token to
+    `/api/auth/oauth/{google|apple}`; the backend verifies and issues our own
+    token pair. New schema (`oauth_accounts`, Flyway `V20260528130000`) with
+    `(provider, provider_uid)` UNIQUE. `OAuthTokenVerifier` interface +
+    `NimbusOAuthTokenVerifier` impl that builds one `NimbusJwtDecoder` per
+    provider against the JWKS URI (lazy fetch + cache) and validates
+    issuer + audience after decoding. `SocialAuthService.loginWithProvider`:
+    existing `oauth_account` → reuse user; known email → link the existing
+    user; unknown → create user (ATHLETE role, no `password_hash`, handle
+    derived from email's local part with `_N` collision suffix). `SocialAuthIT`
+    6/6 (mocks the verifier with `@MockitoBean` — no WireMock + stub JWKS
+    needed): new-user create + link; repeat login reuses user; existing-email
+    link; invalid token → 401; unsupported provider in path → 401;
+    handle-collision falls through to `<base>_1`. One sharp edge:
+    `OAuthAccount.user` is `@ManyToOne(LAZY)`, so reading `.getEmail()` from a
+    detached entity in the test throws `LazyInitializationException` — compare
+    by id instead (the id lives on the proxy itself).
+  - **Next:** AH-016 (role switch athlete↔coach + profile update).
