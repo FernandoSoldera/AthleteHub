@@ -1,0 +1,87 @@
+# ====================
+# Environment & Secrets (both api/ and client/)
+# ====================
+.env
+.env.local
+.env.*.local
+*.env
+!**/.env.example
+application-local.properties
+application-secret*.properties
+*.pem
+*.key
+*.keystore
+*.jks
+*.p12
+credentials.json
+secrets.json
+firebase-adminsdk*.json
+firebase-service-account*.json
+google-services.json
+GoogleService-Info.plist
+
+# ====================
+# Java / Spring Boot (api/)
+# ====================
+*.class
+*.jar
+*.war
+target/
+!**/src/**/target/
+.mvn/wrapper/maven-wrapper.jar
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+release.properties
+dependency-reduced-pom.xml
+HELP.md
+hs_err_pid*
+replay_pid*
+*.hprof
+jacoco.exec
+*.exec
+
+# ====================
+# Flutter / Dart (client/)
+# ====================
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+**/doc/api/
+*.lock
+!pubspec.lock
+*.g.dart
+*.mocks.dart
+# Flutter generated platform ephemeral files
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/android/.gradle/
+**/android/local.properties
+**/ios/Pods/
+
+# ====================
+# IDE
+# ====================
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.code-workspace
+.classpath
+.project
+.settings/
+
+# ====================
+# Logs / OS
+# ====================
+logs/
+*.log
+spring.log
+.DS_Store
+Thumbs.db
+desktop.ini

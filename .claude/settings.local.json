@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:api.anthropic.com)",
+      "Bash(curl -sS -L -i \"https://api.anthropic.com/v1/design/h/TAXzvFNJpL40ER17GOQBZQ?open_file=AthleteHub.html\")",
+      "Bash(cd \"C:\\\\Users\\\\Fernando\\\\Downloads\" && ls -la AthleteHub-handoff.zip)"
+    ]
+  }
+}
