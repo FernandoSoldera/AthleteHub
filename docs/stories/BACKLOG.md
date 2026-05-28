@@ -43,14 +43,14 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
 | AH-001 | Initialize mono-repo (git, `api/`+`client/`+`docs/`, flatten docs, .gitignore) | DONE | — |
-| AH-002 | Scaffold Spring Boot `api/` (pom mirror lotuga, profiles, .env, Postgres compose, Flyway baseline) | WIP | AH-001 |
+| AH-002 | Scaffold Spring Boot `api/` (pom mirror lotuga, profiles, .env, Postgres compose, Flyway baseline) | DONE | AH-001 |
 | AH-003 | Scaffold Flutter `client/` (pubspec, folders, theme + i18n skeleton, app shell) | DONE | AH-001 |
-| AH-004 | Backend cross-cutting (ApiResponse, global exception advice, WebConfig/CORS, IT harness) | WIP | AH-002 |
+| AH-004 | Backend cross-cutting (ApiResponse, global exception advice, WebConfig/CORS, IT harness) | DONE | AH-002 |
 
 ### EPIC 1 — Identity & Auth · [epic-1-identity-auth.md](epic-1-identity-auth.md)
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
-| AH-010 | Schema: users, roles, refresh_tokens (Flyway) | WIP | AH-004 |
+| AH-010 | Schema: users, roles, refresh_tokens (Flyway) | DONE | AH-004 |
 | AH-011 | Register (email+password), password hashing, /me read | TODO | AH-010 |
 | AH-012 | Login + JWT issuance, JwtUtil/Filter, SecurityConfig | TODO | AH-011 |
 | AH-013 | Refresh-token rotation + logout | TODO | AH-012 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 2 done, 3 in progress / 47.
+**Progress:** 5 done / 47.
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -148,4 +148,14 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
   - **AH-002 + AH-004 WIP** — backend `api/` fully scaffolded (pom mirroring lotuga, Maven wrapper, `com.example.athletehub` layered packages, `AthleteHubApplication`, `application.properties` + `it` profile, Flyway baseline `V20260527120000`, `.env.example`, `Dockerfile`, `docker-compose.yml`, `ApiResponse`/`MessageCode`, exceptions + `GlobalExceptionHandler`, `WebConfig`/`JacksonConfig`, `SecurityConfig` skeleton, `AbstractIntegrationTest` + `SmokeIT`). **To close:** build-verify needs **JDK 25** (machine `JAVA_HOME` is 24) + Docker → `cd api && ./mvnw verify` (runs `SmokeIT`) and `./mvnw spring-boot:run` → `/actuator/health` UP. Profiles follow lotuga (single `application.properties` + env vars + `it` test profile), not separate dev/prod YAML.
   - **AH-003 DONE** — Flutter `client/` scaffolded (`flutter create --org com.example --project-name athletehub --platforms=android,ios`); custom `pubspec.yaml` (http, dotenv, secure_storage, svg, intl, fl_chart, firebase_core/messaging, google_sign_in, sign_in_with_apple; dev: integration_test, mockito, build_runner, flutter_lints); type-based `lib/` folders (`config i18n models[+responses] screens services[+api] styles widgets`); `AppTheme.themeFor` (dark + light × 4 accent palettes from `tokens.css`); `AppLocalizations` + `en.json` + `pt.json`; `main.dart` shell with 5-tab `NavigationBar` (Feed/Train/Evolve/Diet/Me) via `PlaceholderScreen`. Verified: `flutter pub get` resolves, `flutter analyze` clean (no issues), `flutter test` passes the smoke widget test.
   - **AH-010 WIP** — Flyway migration `V20260527130000__create_users_roles_refresh_tokens.sql` written (tables: `users`, `user_roles`, `refresh_tokens` per 02-data-model §4.1, MVP-simplified — no `client_uuid`, no separate per-context schema; emails/handles normalized in the service rather than via `citext`). Build-verify shares the same JDK-25 unblock as AH-002/004.
-  - **Next:** verify backend on JDK 25 → flip AH-002/004/010 to DONE; then EPIC 1 continues with **AH-011** (register endpoint, /me).
+- **2026-05-28** — Backend verified on JDK 25 + Docker.
+  - `cd api && ./mvnw verify` → **BUILD SUCCESS** (19.5s, cache warm).
+  - `SmokeIT` booted Spring Boot 4 (Java 25.0.1) against Testcontainers
+    PostgreSQL 16, applied Flyway baseline + `V20260527130000` (users + roles
+    + refresh_tokens), and asserted `/actuator/health` is `UP`.
+  - Fix landed: Spring Boot 4 no longer exposes `TestRestTemplate` at
+    `org.springframework.boot.test.web.client`, so `AbstractIntegrationTest`
+    now uses a plain `RestTemplate` configured to not follow redirects and not
+    throw on 4xx/5xx — exactly lotuga's pattern.
+  - **AH-002, AH-004, AH-010 → DONE.** Epic 0 fully closed.
+  - **Next:** AH-011 (register endpoint + `/me`).
