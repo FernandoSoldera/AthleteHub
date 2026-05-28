@@ -2,6 +2,7 @@ package com.example.athletehub.controller;
 
 import com.example.athletehub.dto.AuthResponse;
 import com.example.athletehub.dto.LoginRequest;
+import com.example.athletehub.dto.RefreshTokenRequest;
 import com.example.athletehub.dto.SignupRequest;
 import com.example.athletehub.dto.UserDto;
 import com.example.athletehub.service.AuthService;
@@ -17,10 +18,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Public auth endpoints. The path prefix {@code /api/auth/**} is permitted by
- * {@code SecurityConfig}. Token refresh (AH-013), password reset (AH-014) and
- * OAuth (AH-015) follow. Invalid credentials surface as
- * {@link com.example.athletehub.exception.InvalidCredentialsException} from the
- * service and are translated to a 401 JSON envelope by the global handler.
+ * {@code SecurityConfig}. Password reset (AH-014) and OAuth (AH-015) follow.
+ * Invalid credentials / invalid refresh tokens surface as domain exceptions
+ * translated to 401 JSON envelopes by the global handler.
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -39,5 +39,17 @@ public class AuthController {
     public AuthResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
         String deviceInfo = httpRequest.getHeader("User-Agent");
         return authService.login(request, deviceInfo);
+    }
+
+    @PostMapping("/token/refresh")
+    public AuthResponse refresh(@Valid @RequestBody RefreshTokenRequest request, HttpServletRequest httpRequest) {
+        String deviceInfo = httpRequest.getHeader("User-Agent");
+        return authService.refresh(request.getRefreshToken(), deviceInfo);
+    }
+
+    @PostMapping("/logout")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void logout(@Valid @RequestBody RefreshTokenRequest request) {
+        authService.logout(request.getRefreshToken());
     }
 }

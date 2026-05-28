@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.UUID;
 
 /**
  * Issues and verifies short-lived access JWTs. The token subject is the user
@@ -44,6 +45,7 @@ public class JwtUtil {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + accessTokenExpirationMs);
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())  // jti — guarantees uniqueness even on same-ms generation
                 .subject(Long.toString(userId))
                 .claim("type", "access")
                 .issuedAt(now)

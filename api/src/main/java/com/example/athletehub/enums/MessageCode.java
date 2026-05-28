@@ -17,5 +17,8 @@ public enum MessageCode {
 
     // Identity / signup (EPIC 1)
     EMAIL_ALREADY_REGISTERED,
-    HANDLE_ALREADY_TAKEN
+    HANDLE_ALREADY_TAKEN,
+
+    // Identity / tokens (EPIC 1 — AH-013)
+    INVALID_REFRESH_TOKEN
 }

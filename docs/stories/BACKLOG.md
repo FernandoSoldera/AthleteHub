@@ -53,7 +53,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-010 | Schema: users, roles, refresh_tokens (Flyway) | DONE | AH-004 |
 | AH-011 | Register (email+password), password hashing, /me read | DONE | AH-010 |
 | AH-012 | Login + JWT issuance, JwtUtil/Filter, SecurityConfig | DONE | AH-011 |
-| AH-013 | Refresh-token rotation + logout | TODO | AH-012 |
+| AH-013 | Refresh-token rotation + logout | DONE | AH-012 |
 | AH-014 | Password reset via email (GreenMail-tested) | TODO | AH-012 |
 | AH-015 | Social login (Apple, Google) OAuth2 | TODO | AH-012 |
 | AH-016 | Role switch (athlete/coach) + profile update | TODO | AH-011 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 7 done / 47.
+**Progress:** 8 done / 47.
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -203,6 +203,20 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     package, browsers, curl) don't have this quirk; only the test harness was
     affected. Also added the `spring-boot-flyway` module (Spring Boot 4
     modularized auto-configuration per feature).
-  - **Next:** AH-013 (refresh-token rotation + logout) — extend
-    `RefreshTokenService` with rotate/validate/revoke + `POST
-    /api/auth/token/refresh` and `POST /api/auth/logout`.
+  - **AH-013 DONE.** Refresh-token rotation, reuse detection, logout.
+    `RefreshTokenService.rotate` validates + revokes the presented token and
+    issues a fresh one; presenting an already-revoked token is treated as
+    compromise — every active token for that user is revoked before throwing.
+    `RefreshTokenService.revoke` is idempotent. Endpoints:
+    `POST /api/auth/token/refresh` returns a full `AuthResponse`;
+    `POST /api/auth/logout` returns 204. `RefreshIT` 6/6: happy rotation +
+    revocation, reuse-detection compromise revokes all active tokens, expired
+    token 401, unknown token 401, logout revokes + blocks subsequent refresh,
+    logout with unknown token is 204 idempotent. Two sharp edges fixed:
+      • JWT access tokens now carry a `jti` (UUID) — without it, login + refresh
+        in the same millisecond produced byte-identical tokens.
+      • `AuthService.refresh` uses `@Transactional(noRollbackFor =
+        InvalidRefreshTokenException.class)`. With default REQUIRED propagation
+        the inner `rotate`'s rollback rules are ignored; without this on the
+        outer, the reuse-detection revocations would roll back.
+  - **Next:** AH-014 (password reset via email — Spring Mail + GreenMail IT).
