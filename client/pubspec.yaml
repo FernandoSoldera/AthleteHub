@@ -1,0 +1,50 @@
+name: athletehub
+description: "AthleteHub — gym training journal + fitness social network."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Networking + config
+  http: ^1.2.0
+  flutter_dotenv: ^5.2.1
+  flutter_secure_storage: ^9.2.4
+
+  # UI
+  flutter_svg: ^2.2.3
+  intl: ^0.20.2
+  fl_chart: ^0.69.0
+
+  # Firebase (push, EPIC 9)
+  firebase_core: ^3.13.1
+  firebase_messaging: ^15.2.5
+
+  # Social sign-in (EPIC 1: AH-015)
+  google_sign_in: ^6.2.2
+  sign_in_with_apple: ^6.1.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  mockito: ^5.4.4
+  build_runner: ^2.4.13
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/i18n/en.json
+    - assets/i18n/pt.json
+    - .env

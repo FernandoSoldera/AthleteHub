@@ -1,0 +1,29 @@
+{
+  "app": {
+    "name": "AthleteHub"
+  },
+  "common": {
+    "or": "OU",
+    "email": "E-mail",
+    "password": "Senha",
+    "cancel": "Cancelar",
+    "save": "Salvar"
+  },
+  "navigation": {
+    "feed": "Feed",
+    "train": "Treino",
+    "evolve": "Evolução",
+    "diet": "Dieta",
+    "me": "Eu"
+  },
+  "errors": {
+    "VALIDATION_FAILED": "Alguns campos estão inválidos.",
+    "RESOURCE_NOT_FOUND": "Não encontrado.",
+    "INVALID_CREDENTIALS": "E-mail ou senha inválidos.",
+    "ACCESS_DENIED": "Você não tem acesso a isto.",
+    "UNKNOWN_ERROR": "Ocorreu um erro. Tente novamente."
+  },
+  "success": {
+    "SUCCESS": "Pronto."
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "app": {
+    "name": "AthleteHub"
+  },
+  "common": {
+    "or": "OR",
+    "email": "Email",
+    "password": "Password",
+    "cancel": "Cancel",
+    "save": "Save"
+  },
+  "navigation": {
+    "feed": "Feed",
+    "train": "Train",
+    "evolve": "Evolve",
+    "diet": "Diet",
+    "me": "Me"
+  },
+  "errors": {
+    "VALIDATION_FAILED": "Some fields are invalid.",
+    "RESOURCE_NOT_FOUND": "Not found.",
+    "INVALID_CREDENTIALS": "Invalid email or password.",
+    "ACCESS_DENIED": "You don't have access to this.",
+    "UNKNOWN_ERROR": "An error occurred. Please try again."
+  },
+  "success": {
+    "SUCCESS": "Done."
+  }
+}
