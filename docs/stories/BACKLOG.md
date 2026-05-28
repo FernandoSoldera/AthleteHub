@@ -56,7 +56,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-013 | Refresh-token rotation + logout | DONE | AH-012 |
 | AH-014 | Password reset via email (GreenMail-tested) | DONE | AH-012 |
 | AH-015 | Social login (Apple, Google) OAuth2 | DONE | AH-012 |
-| AH-016 | Role switch (athlete/coach) + profile update | TODO | AH-011 |
+| AH-016 | Role switch (athlete/coach) + profile update | DONE | AH-011 |
 | AH-017 | Client: auth screens, secure storage, http_interceptor, auth_api_service | TODO | AH-012, AH-003 |
 
 ### EPIC 2 — Social graph & profile · [epic-2-social-profile.md](epic-2-social-profile.md)
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 10 done / 47.
+**Progress:** 11 done / 47.
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -259,4 +259,16 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     `OAuthAccount.user` is `@ManyToOne(LAZY)`, so reading `.getEmail()` from a
     detached entity in the test throws `LazyInitializationException` — compare
     by id instead (the id lives on the proxy itself).
-  - **Next:** AH-016 (role switch athlete↔coach + profile update).
+  - **AH-016 DONE.** `UserService` + a richer `UserController`: `GET /api/me`
+    (existing), `PATCH /api/me` (partial profile update — fullName, bio, age,
+    heightCm, avatarHue, with Bean Validation bounds), `POST /api/me/roles/switch`
+    (grants the role on first use, which is the design's "explicit upgrade"
+    path; the active-role choice itself lives in the client). `ProfileIT` 6/6:
+    partial PATCH leaves untouched fields alone, invalid values → 400,
+    unauthenticated 401 on both PATCH and switch, switch to COACH grants the
+    role and persists it, switch to ATHLETE is a no-op when already an
+    athlete.
+  - **Epic 1 backend is fully closed.** Only AH-017 remains (Flutter auth
+    screens + secure storage + http_interceptor with refresh + auth_api_service).
+  - **Next:** **AH-017 — client auth screens** (Flutter side). After that,
+    Epic 2 (social graph & profile) starts the backend domain work proper.
