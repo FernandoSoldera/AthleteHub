@@ -84,7 +84,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 |----|-------|--------|-----------|
 | AH-040 | Schema: evaluations, evaluation_measurements | DONE | AH-010 |
 | AH-041 | Save evaluation + measurements + body-fat computation | DONE | AH-040 |
-| AH-042 | Body overview + metric series (weight/arm/waist/bench, ranges) | TODO | AH-041 |
+| AH-042 | Body overview + metric series (weight/arm/waist/bench, ranges) | DONE | AH-041 |
 | AH-043 | Client: Evolution, New Evaluation (manikin), Graph detail + service | TODO | AH-042, AH-017 |
 
 ### EPIC 5 — Nutrition · [epic-5-nutrition.md](epic-5-nutrition.md)
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 26 done / 47. **Epic 1–3 fully closed; Epic 4 (Body / Evolution) 2/4 — schema + save evaluation w/ J-P 7-site, Navy, manual body-fat.**
+**Progress:** 27 done / 47. **Epic 1–3 fully closed; Epic 4 backend done (3/4) — only AH-043 (Flutter client) remains to close the epic.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -820,9 +820,78 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     `searchVisible` (no name filter) and `searchVisibleByName`
     (the LIKE branch). Service picks based on whether `q` is null.
     No behavior change for callers; tests still 10/10.
-  - **Next:** **AH-042 — body overview + metric series**:
-    `GET /api/evaluations` (recent list, cursor-paginated) and
-    `GET /api/evaluations/metric-series?metric=weight|arm_r|waist
-    |bench&range=4w|12w|6m|1y` (time-series derived at read time
-    from `evaluations` + `evaluation_measurements`, plus
-    `personal_records` for bench 1RM).
+  - **AH-042 DONE** — recent evaluations list + metric series.
+    **Closes the backend half of Epic 4** — only AH-043 (Flutter
+    client) remains. Two endpoints:
+      * **`GET /api/evaluations?cursor=&limit=`** — newest-first
+        cursor pagination on id DESC (surrogate-id cursor, not
+        `evaluated_at`, so backfilled rows surface at the top —
+        same UX rule as cardio). Returns the slim
+        `EvaluationSummaryDto` (no measurements) so a 20-row page
+        stays cheap; the full hydrated view lives at
+        `/api/evaluations/{id}` (AH-041).
+      * **`GET /api/body/series?metric=...&range=...`** —
+        `{metric, range, unit, points: [{at, value}, ...]}`.
+        Points are sorted oldest → newest so the client renders
+        straight into a line chart without re-sorting.
+    Lives on a separate `BodyController` because it's a computed
+    derivation across `evaluations + evaluation_measurements`
+    rather than CRUD on a single evaluation row.
+    Metric dispatch (in `EvaluationService.getMetricSeries`):
+      * `weight` → reads `weight_kg` from each evaluation in the
+        window. Unit: `"kg"`.
+      * `body_fat` → reads `body_fat_pct`, filtering null rows
+        (weight-only check-ins don't pollute the chart). Unit:
+        `"%"`.
+      * anything else → treated as a `point_id`. Joins through
+        `evaluation_measurements` in one batched query
+        (`findByEvaluationIdInAndPointId`); unit derived from the
+        stored row (`cm` for circumferences, `mm` for skinfolds).
+        Empty result → empty unit (we don't guess; the client
+        knows what it asked for).
+    Ranges accepted: `4w` (28 d), `12w` (84 d), `6m` (180 d),
+    `1y` (365 d). Anything else → 400 `INVALID_RANGE` so we never
+    run an unbounded scan. Window end is "now" via the existing
+    `Clock` bean — tests pin it via the same
+    `@TestConfiguration` pattern AH-032/035 established.
+    **Bench 1RM history intentionally deferred.** The
+    `personal_records` table only stores the *current* best per
+    `(user, exercise, metric)`; reconstructing history needs a
+    per-session scan that's out of MVP scope. The Train screen
+    already surfaces PR count + flagged sets on the recent-sessions
+    list. Worth a follow-up story when the UX needs it.
+    Files:
+      * `dto/{EvaluationSummaryDto, MetricPoint, MetricSeriesDto}`
+      * `repository/EvaluationRepository` + `findRecent` +
+        `findByUserInRange`
+      * `repository/EvaluationMeasurementRepository` +
+        `findByEvaluationIdInAndPointId`
+      * `service/EvaluationService` + `listRecent`,
+        `getMetricSeries`, `measurementSeries`, `parseRange`,
+        `Clock` dep
+      * `controller/EvaluationController` + GET list endpoint
+      * `controller/BodyController` (new, `/api/body/series`)
+      * `enums/MessageCode` + `INVALID_METRIC`, `INVALID_RANGE`
+    `EvaluationListAndSeriesIT` 13/13 (5 s) using the same pinned
+    `Clock` `@TestConfiguration` as AH-032/035 (Wed 2026-05-27):
+      * list — empty case, newest-first ordering with summary DTO
+        omitting `measurements`, per-user visibility, cursor
+        pagination, no token → 401.
+      * series — weight in 4w window includes only inside-window
+        rows oldest-first; 12w window includes more history;
+        body_fat filters null rows + uses `%` unit; point_id
+        returns measurement values with stored unit (`cm`); empty
+        point_id returns empty array + empty unit; no leakage
+        between users; invalid range → 400 `INVALID_RANGE`; no
+        token → 401.
+    Full backend suite: **167/167** (19 ITs + 3 unit).
+  - **Next:** **AH-043 — Flutter client: Evolution / New Evaluation /
+    Graph detail.** Closes Epic 4. Roughly:
+    `services/api/evaluation_api_service.dart` (today's overview
+    via list + last-summary, create, get, list paginated, metric
+    series), `screens/evolution_screen.dart` (latest weight + bf
+    summary + chart picker + recent list), `screens/new_evaluation_screen.dart`
+    (manikin-style body with point taps for circumferences /
+    skinfolds, weight + bf-method form, calls POST /api/evaluations),
+    `screens/graph_detail_screen.dart` (full metric series with
+    range picker). Plain `setState`; online-first.

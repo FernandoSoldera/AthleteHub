@@ -1,9 +1,13 @@
 package com.example.athletehub.service;
 
 import com.example.athletehub.dto.CreateEvaluationRequest;
+import com.example.athletehub.dto.CursorPage;
 import com.example.athletehub.dto.EvaluationDto;
 import com.example.athletehub.dto.EvaluationMeasurementDto;
 import com.example.athletehub.dto.EvaluationMeasurementRequest;
+import com.example.athletehub.dto.EvaluationSummaryDto;
+import com.example.athletehub.dto.MetricPoint;
+import com.example.athletehub.dto.MetricSeriesDto;
 import com.example.athletehub.enums.MessageCode;
 import com.example.athletehub.exception.BadRequestException;
 import com.example.athletehub.exception.ResourceNotFoundException;
@@ -14,10 +18,13 @@ import com.example.athletehub.repository.EvaluationMeasurementRepository;
 import com.example.athletehub.repository.EvaluationRepository;
 import com.example.athletehub.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -52,6 +59,7 @@ public class EvaluationService {
     private final EvaluationRepository evaluationRepository;
     private final EvaluationMeasurementRepository measurementRepository;
     private final UserRepository userRepository;
+    private final Clock clock;
 
     // ── create ───────────────────────────────────────────────────────────
 
@@ -187,5 +195,107 @@ public class EvaluationService {
                         .map(EvaluationMeasurementDto::from)
                         .toList();
         return EvaluationDto.from(evaluation, measurements);
+    }
+
+    // ── AH-042 — recent list + metric series ─────────────────────────────
+
+    /** Recent evaluations newest-first; slim DTO so a 20-row page is cheap. */
+    @Transactional(readOnly = true)
+    public CursorPage<EvaluationSummaryDto> listRecent(Long userId, Long cursor, int limit) {
+        List<Evaluation> rows = evaluationRepository.findRecent(
+                userId, cursor, PageRequest.of(0, limit + 1));
+        boolean hasMore = rows.size() > limit;
+        List<Evaluation> visible = hasMore ? rows.subList(0, limit) : rows;
+        List<EvaluationSummaryDto> items = visible.stream()
+                .map(EvaluationSummaryDto::from)
+                .toList();
+        String nextCursor = hasMore
+                ? String.valueOf(visible.get(visible.size() - 1).getId())
+                : null;
+        return CursorPage.of(items, nextCursor);
+    }
+
+    /**
+     * Time-series for one metric over the requested range. Two built-in
+     * metrics — {@code weight} and {@code body_fat} — read straight from
+     * the {@link Evaluation} row; anything else is treated as a
+     * {@code point_id} and joined through {@link EvaluationMeasurement}.
+     *
+     * <p>Bench 1RM history is intentionally not surfaced here: the
+     * {@code personal_records} table only stores the current best per
+     * (user, exercise, metric), and reconstructing history needs a
+     * per-session scan that's out of MVP scope. The Train screen already
+     * shows the PR count on the recent-sessions list.
+     *
+     * <p>The end of the window is "now" per the injected {@link Clock} so
+     * tests can pin it deterministically.
+     */
+    @Transactional(readOnly = true)
+    public MetricSeriesDto getMetricSeries(Long userId, String metric, String range) {
+        if (metric == null || metric.isBlank()) {
+            throw new BadRequestException(MessageCode.INVALID_METRIC);
+        }
+        int days = parseRange(range);
+
+        OffsetDateTime end = OffsetDateTime.now(clock);
+        OffsetDateTime start = end.minusDays(days);
+
+        List<Evaluation> rows = evaluationRepository.findByUserInRange(userId, start, end);
+
+        return switch (metric) {
+            case "weight" -> new MetricSeriesDto(metric, range, "kg",
+                    rows.stream()
+                            .filter(e -> e.getWeightKg() != null)
+                            .map(e -> new MetricPoint(e.getEvaluatedAt(), e.getWeightKg()))
+                            .toList());
+            case "body_fat" -> new MetricSeriesDto(metric, range, "%",
+                    rows.stream()
+                            .filter(e -> e.getBodyFatPct() != null)
+                            .map(e -> new MetricPoint(e.getEvaluatedAt(), e.getBodyFatPct()))
+                            .toList());
+            default -> measurementSeries(metric, range, rows);
+        };
+    }
+
+    /**
+     * Builds a series for a free-form {@code point_id} by joining the
+     * windowed evaluations to their measurements in one batch.
+     * Unit comes from the stored measurement rows; falls back to empty
+     * string when the user has no data for that point yet (the client
+     * already knows what unit it asked for so an empty fallback is
+     * honest rather than guessed).
+     */
+    private MetricSeriesDto measurementSeries(String pointId, String range, List<Evaluation> rows) {
+        if (rows.isEmpty()) return new MetricSeriesDto(pointId, range, "", List.of());
+
+        List<Long> evalIds = rows.stream().map(Evaluation::getId).toList();
+        Map<Long, EvaluationMeasurement> byEval = new HashMap<>();
+        String unit = "";
+        for (EvaluationMeasurement m : measurementRepository.findByEvaluationIdInAndPointId(evalIds, pointId)) {
+            byEval.put(m.getEvaluationId(), m);
+            unit = m.getUnit();  // last one wins; all rows for a point share a unit
+        }
+        List<MetricPoint> points = new ArrayList<>();
+        for (Evaluation e : rows) {
+            EvaluationMeasurement m = byEval.get(e.getId());
+            if (m != null) points.add(new MetricPoint(e.getEvaluatedAt(), m.getValue()));
+        }
+        return new MetricSeriesDto(pointId, range, unit, points);
+    }
+
+    /**
+     * Accepted ranges: {@code 4w} (28 d), {@code 12w} (84 d),
+     * {@code 6m} (180 d), {@code 1y} (365 d). Anything else → 400
+     * INVALID_RANGE so we never run an unbounded scan.
+     */
+    private static int parseRange(String range) {
+        if (range == null) throw new BadRequestException(MessageCode.INVALID_RANGE);
+        return switch (range) {
+            case "4w" -> 28;
+            case "12w" -> 84;
+            case "6m" -> 180;
+            case "1y" -> 365;
+            default -> throw new BadRequestException(MessageCode.INVALID_RANGE);
+        };
     }
 }
