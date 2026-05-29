@@ -33,5 +33,10 @@ public enum MessageCode {
 
     // Training (EPIC 3 — AH-032)
     ACTIVE_SESSION_EXISTS,
-    TEMPLATE_NOT_FOUND
+    TEMPLATE_NOT_FOUND,
+
+    // Training (EPIC 3 — AH-033)
+    SESSION_NOT_FOUND,
+    SESSION_NOT_IN_PROGRESS,
+    INVALID_SET_OP
 }

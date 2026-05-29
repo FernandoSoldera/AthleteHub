@@ -1,5 +1,6 @@
 package com.example.athletehub.controller;
 
+import com.example.athletehub.dto.PatchSessionRequest;
 import com.example.athletehub.dto.StartSessionRequest;
 import com.example.athletehub.dto.TodayPlanResponse;
 import com.example.athletehub.dto.WorkoutSessionDto;
@@ -10,6 +11,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -47,6 +50,19 @@ public class TrainingController {
     public WorkoutSessionDto startSession(Authentication authentication,
                                           @Valid @RequestBody(required = false) StartSessionRequest request) {
         return trainingService.startSession(currentUserId(authentication), request);
+    }
+
+    @PatchMapping("/workout-sessions/{id:\\d+}")
+    public WorkoutSessionDto patchSession(Authentication authentication,
+                                          @PathVariable("id") Long id,
+                                          @Valid @RequestBody PatchSessionRequest request) {
+        return trainingService.patchSession(currentUserId(authentication), id, request);
+    }
+
+    @PostMapping("/workout-sessions/{id:\\d+}/finish")
+    public WorkoutSessionDto finishSession(Authentication authentication,
+                                           @PathVariable("id") Long id) {
+        return trainingService.finishSession(currentUserId(authentication), id);
     }
 
     private Long currentUserId(Authentication authentication) {

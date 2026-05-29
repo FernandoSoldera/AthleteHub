@@ -74,7 +74,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-030 | Schema: exercises, templates, sessions, session_exercises, sets, cardio, PRs | DONE | AH-010 |
 | AH-031 | Exercise catalog endpoints + seed | DONE | AH-030 |
 | AH-032 | Today's plan + start session | DONE | AH-031 |
-| AH-033 | Log/complete sets + finish session (volume, PR detection) | TODO | AH-032 |
+| AH-033 | Log/complete sets + finish session (volume, PR detection) | DONE | AH-032 |
 | AH-034 | Cardio logging (run/walk/cycle) | TODO | AH-030 |
 | AH-035 | Recent sessions + weekly cardio summary | TODO | AH-033, AH-034 |
 | AH-036 | Client: Train, live Workout (rest timer), Cardio screens + service | TODO | AH-033, AH-017 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 20 done / 47. **Epic 1 + Epic 2 fully closed; Epic 3 (Training) 3/7 — schema + catalog + today's plan/start session.**
+**Progress:** 21 done / 47. **Epic 1 + Epic 2 fully closed; Epic 3 (Training) 4/7 — schema + catalog + today/start + log sets/finish (with PR detection).**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -481,8 +481,65 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     start with template → seeded in order with names, double-start
     → 409, unknown template → 404, another user's template → 404,
     no token → 401. Full suite: **83/83** (12 ITs + 3 unit).
-  - **Next:** **AH-033 — log sets + finish session**: PATCH
-    `/api/workout-sessions/{id}` to append/update/complete sets;
-    POST `/api/workout-sessions/{id}/finish` to compute
-    `total_volume_kg` + `total_sets`, detect e1RM / max-weight PRs,
-    upsert `personal_records`, flip status to `completed`.
+  - **AH-033 DONE** — granular set ops + finish session with PR
+    detection. Two endpoints:
+      * **`PATCH /api/workout-sessions/{id:\\d+}`** — body is
+        `{ sets: [SetOpRequest, ...] }` (1..100 ops). Each op is
+        idempotent on the natural key `(sessionExerciseId, setNumber)`:
+        `upsert` inserts if no row matches and updates if one does;
+        `delete` drops the matching row (no-op on miss). When a set
+        transitions from done=false to done=true we stamp
+        `completed_at = now`; the reverse clears it. Atomic per
+        request — either every op succeeds or none do. Returns the
+        full updated `WorkoutSessionDto`.
+        Chose granular ops over diff-replace because a flaky network
+        during a workout costs at most the in-flight set, not the
+        whole session.
+      * **`POST /api/workout-sessions/{id:\\d+}/finish`** — server
+        recomputes the authoritative rollups (`total_sets`,
+        `total_volume_kg = SUM(weight * reps)` over done sets) regardless
+        of any running client estimate; detects per-exercise PRs on
+        two metrics:
+          - **e1RM (Epley)** = `weight * (1 + reps / 30)` — best across
+            done sets per exercise.
+          - **max_weight** — heaviest done set per exercise.
+        Loads existing PRs in one batch
+        (`findByUserIdAndExerciseIdIn`), compares, upserts only when
+        beaten (so re-finishing the same numbers doesn't churn rows),
+        flags the responsible set's `is_pr = true`, increments
+        `user_counters.sessions`, sets `ended_at` + `duration_seconds`,
+        flips `status → completed`.
+    Sharp edges encoded:
+      * Cross-row "at most one in_progress per user" stays in service
+        code (no portable SQL CHECK).
+      * Patch + finish reject other users' sessions with 404
+        `SESSION_NOT_FOUND` (don't disclose existence); patch ops with
+        a `sessionExerciseId` foreign to the session → 400
+        `INVALID_SET_OP`; patch/finish on completed → 409
+        `SESSION_NOT_IN_PROGRESS`.
+      * Unknown op string → 400 `INVALID_SET_OP`.
+      * Sets with `done = false` or null `weight_kg`/`reps` are
+        ignored in rollups + PR detection (so a 500 kg phantom set
+        left at done=false can't accidentally PR you).
+      * BigDecimal scale stabilized at 2 for both rollups and PRs so
+        comparison/round-trip stays clean.
+      * On the BigDecimal side, used `setScale(2, HALF_UP)` everywhere
+        on the response path so JSON ↔ DB ↔ in-memory stays
+        round-trip stable.
+    `LogSetsAndFinishIT` 16/16 (5 s): patch upsert insert-then-update
+    on same key, delete then re-delete (idempotent), multi-op
+    atomicity across two session_exercises, cross-session se_id → 400,
+    patch on another user's session → 404, patch on completed → 409,
+    unknown op → 400; finish computes total_sets + total_volume
+    correctly, creates e1rm + max_weight PRs when none existed and
+    flags the set, doesn't create PRs when prior is better, flags
+    different sets for different metrics when each wins one,
+    increments `user_counters.sessions`, ignores undone sets, finish
+    on completed → 409, finish on another user's session → 404,
+    finish without token → 401.
+    Full backend suite: **99/99** (13 ITs + 3 unit).
+  - **Next:** **AH-034 — cardio logging**: `POST
+    /api/cardio-activities` (run/walk/cycle with distance,
+    duration, avg pace/HR/power, elevation, kcal, notes) and `GET
+    /api/cardio-activities?cursor=` (recent list, cursor on id
+    DESC).
