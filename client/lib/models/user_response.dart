@@ -11,6 +11,7 @@ class UserResponse {
     this.bio,
     this.age,
     this.heightCm,
+    this.sex,
     this.dateJoined,
   });
 
@@ -23,6 +24,9 @@ class UserResponse {
   final String? bio;
   final int? age;
   final double? heightCm;
+  /// Biological sex (`"male"` / `"female"`); nullable. Used by AH-041
+  /// body-fat formulas — users who don't supply it use `manual` body-fat.
+  final String? sex;
   final String? dateJoined;
 
   factory UserResponse.fromJson(Map<String, dynamic> json) {
@@ -38,6 +42,7 @@ class UserResponse {
       bio: json['bio'] as String?,
       age: (json['age'] as num?)?.toInt(),
       heightCm: (json['heightCm'] as num?)?.toDouble(),
+      sex: json['sex'] as String?,
       dateJoined: json['dateJoined'] as String?,
     );
   }
@@ -52,6 +57,7 @@ class UserResponse {
         if (bio != null) 'bio': bio,
         if (age != null) 'age': age,
         if (heightCm != null) 'heightCm': heightCm,
+        if (sex != null) 'sex': sex,
         if (dateJoined != null) 'dateJoined': dateJoined,
       };
 

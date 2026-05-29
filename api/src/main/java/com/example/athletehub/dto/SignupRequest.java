@@ -34,4 +34,14 @@ public class SignupRequest {
     @Pattern(regexp = "^[a-zA-Z0-9_.]+$",
              message = "handle may only contain letters, digits, dot and underscore")
     private String handle;
+
+    /**
+     * Biological sex — used by AH-041 body-fat formulas. Optional at signup;
+     * users can add it later via PATCH /me. The schema CHECK enforces the
+     * value set; the @Pattern here keeps the response code at 400
+     * VALIDATION_FAILED instead of 500 DataIntegrityViolation.
+     */
+    @Pattern(regexp = "^(male|female)$",
+             message = "sex must be 'male' or 'female'")
+    private String sex;
 }

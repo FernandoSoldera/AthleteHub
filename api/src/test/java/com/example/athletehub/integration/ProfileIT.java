@@ -89,6 +89,24 @@ class ProfileIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void patch_me_sets_and_rejects_invalid_sex() {
+        // Initially sex is null (signup didn't set it).
+        ResponseEntity<String> initial = patchMe(Map.of("sex", "male"));
+        assertThat(initial.getStatusCode().value()).isEqualTo(200);
+        assertThat(json(initial.getBody()).get("sex").asText()).isEqualTo("male");
+
+        // Sticks across reads.
+        assertThat(userRepository.findByEmail(EMAIL).orElseThrow().getSex())
+                .isEqualTo("male");
+
+        // Invalid value → 400; existing value stays.
+        ResponseEntity<String> bad = patchMe(Map.of("sex", "yes"));
+        assertThat(bad.getStatusCode().value()).isEqualTo(400);
+        assertThat(userRepository.findByEmail(EMAIL).orElseThrow().getSex())
+                .isEqualTo("male");
+    }
+
+    @Test
     void patch_me_without_token_returns_401() {
         ResponseEntity<String> response = rest.exchange(
                 "/api/me", HttpMethod.PATCH,

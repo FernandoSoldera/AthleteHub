@@ -2,6 +2,7 @@ package com.example.athletehub.dto;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -40,4 +41,12 @@ public class UpdateProfileRequest {
     @Min(0)
     @Max(359)
     private Integer avatarHue;
+
+    /**
+     * Biological sex update — used by AH-041 body-fat formulas. Pattern
+     * mirrors the schema CHECK so a bad value returns 400 not 500.
+     */
+    @Pattern(regexp = "^(male|female)$",
+             message = "sex must be 'male' or 'female'")
+    private String sex;
 }

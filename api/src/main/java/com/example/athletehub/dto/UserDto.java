@@ -26,6 +26,8 @@ public class UserDto {
     private String bio;
     private Integer age;
     private BigDecimal heightCm;
+    /** Biological sex ({@code "male"} / {@code "female"}); nullable. */
+    private String sex;
     private LocalDate dateJoined;
     private Set<Role> roles;
 
@@ -39,6 +41,7 @@ public class UserDto {
                 .bio(user.getBio())
                 .age(user.getAge())
                 .heightCm(user.getHeightCm())
+                .sex(user.getSex())
                 .dateJoined(user.getDateJoined())
                 .roles(user.getRoles())
                 .build();

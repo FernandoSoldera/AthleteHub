@@ -51,6 +51,7 @@ public class UserService {
         if (request.getAge() != null)       user.setAge(request.getAge());
         if (request.getHeightCm() != null)  user.setHeightCm(request.getHeightCm());
         if (request.getAvatarHue() != null) user.setAvatarHue(request.getAvatarHue());
+        if (request.getSex() != null)       user.setSex(request.getSex());
 
         return UserDto.from(userRepository.save(user));
     }

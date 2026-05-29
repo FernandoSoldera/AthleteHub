@@ -54,6 +54,13 @@ public class User {
     @Column(name = "height_cm")
     private BigDecimal heightCm;
 
+    /**
+     * Biological sex — {@code "male"} or {@code "female"} — required only
+     * for the body-fat formulas (J-P 7, Durnin, Navy) in Epic 4. Nullable
+     * so users can sign up without picking and add it later via PATCH /me.
+     */
+    private String sex;
+
     @Column(nullable = false)
     @Builder.Default
     private String status = "active";

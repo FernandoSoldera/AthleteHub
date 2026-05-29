@@ -60,6 +60,7 @@ public class AuthService {
                 .passwordHash(passwordEncoder.encode(req.getPassword()))
                 .fullName(req.getFullName().trim())
                 .handle(handle)
+                .sex(req.getSex())  // null when caller omitted it
                 .roles(roles)
                 .build();
 

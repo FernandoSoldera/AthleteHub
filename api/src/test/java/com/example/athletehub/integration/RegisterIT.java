@@ -64,6 +64,46 @@ class RegisterIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void register_accepts_optional_sex_and_round_trips_it() {
+        Map<String, Object> body = Map.of(
+                "email", "sx@example.com",
+                "password", "supersecret1!",
+                "fullName", "Sex Test",
+                "handle", "sx.lifts",
+                "sex", "female"
+        );
+        ResponseEntity<String> response = rest.postForEntity(
+                "/api/auth/register",
+                new HttpEntity<>(body, jsonHeaders()),
+                String.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(201);
+        assertThat(json(response.getBody()).get("sex").asText()).isEqualTo("female");
+
+        assertThat(userRepository.findByEmail("sx@example.com").orElseThrow().getSex())
+                .isEqualTo("female");
+    }
+
+    @Test
+    void register_returns_400_on_invalid_sex() {
+        Map<String, Object> body = Map.of(
+                "email", "bad@example.com",
+                "password", "supersecret1!",
+                "fullName", "Bad",
+                "handle", "bad.user",
+                "sex", "yes"
+        );
+        ResponseEntity<String> response = rest.postForEntity(
+                "/api/auth/register",
+                new HttpEntity<>(body, jsonHeaders()),
+                String.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThat(json(response.getBody()).get("code").asText())
+                .isEqualTo(MessageCode.VALIDATION_FAILED.name());
+    }
+
+    @Test
     void register_returns_409_on_duplicate_email_case_insensitive() {
         register(Map.of(
                 "email", "dup@example.com",
