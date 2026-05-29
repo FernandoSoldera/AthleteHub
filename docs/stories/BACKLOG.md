@@ -73,7 +73,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 |----|-------|--------|-----------|
 | AH-030 | Schema: exercises, templates, sessions, session_exercises, sets, cardio, PRs | DONE | AH-010 |
 | AH-031 | Exercise catalog endpoints + seed | DONE | AH-030 |
-| AH-032 | Today's plan + start session | TODO | AH-031 |
+| AH-032 | Today's plan + start session | DONE | AH-031 |
 | AH-033 | Log/complete sets + finish session (volume, PR detection) | TODO | AH-032 |
 | AH-034 | Cardio logging (run/walk/cycle) | TODO | AH-030 |
 | AH-035 | Recent sessions + weekly cardio summary | TODO | AH-033, AH-034 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 19 done / 47. **Epic 1 + Epic 2 fully closed; Epic 3 (Training) 2/7 — schema + exercise catalog.**
+**Progress:** 20 done / 47. **Epic 1 + Epic 2 fully closed; Epic 3 (Training) 3/7 — schema + catalog + today's plan/start session.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -434,8 +434,55 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     but every endpoint in this codebase is unversioned, so we kept it
     `/api/exercises`. When versioning eventually lands, it's an
     across-the-board change rather than one rogue family.
-  - **Next:** **AH-032 — today's plan + start session**: `GET
-    /api/training/today` (planned session from template/assignment as
-    the hero-card payload) and `POST /api/workout-sessions` to start
-    a session in `in_progress`, seeding `session_exercises` from the
-    plan. Uses the schema already in place.
+  - **AH-032 DONE** — today's plan + start session. New Flyway
+    migration `V20260529120000__create_template_schedules.sql` adds a
+    `template_schedules(id, template_id, day_of_week)` table with
+    `UNIQUE(template_id, day_of_week)` + `CHECK(day_of_week BETWEEN
+    1 AND 7)`. ISO weekday numbering (Mon=1…Sun=7) matches Java's
+    `DayOfWeek.getValue()` so the API doesn't need a translation
+    table. Per-template (not per-user) — templates already have
+    `owner_id`, so visibility is derived through the join. When Epic
+    7 adds coach `assignments`, the today endpoint will UNION the two
+    sources.
+    Entities (5): `WorkoutTemplate`, `WorkoutTemplateExercise`,
+    `WorkoutSession`, `SessionExercise`, `TemplateSchedule`. Repos
+    for each, with `WorkoutTemplateRepository.findScheduledFor` doing
+    the `templates ⨝ schedules WHERE owner_id = ? AND day_of_week =
+    ?` join. DTOs: `TodayPlanResponse {template?, activeSessionId?}`
+    (the four nullable combinations are all real states —
+    rest-day/ready/yesterday-still-open/plan-but-active), plus
+    `WorkoutTemplateDto`, `TemplateExerciseDto`, `WorkoutSessionDto`,
+    `SessionExerciseDto`, `StartSessionRequest`.
+    Endpoints:
+      * `GET /api/training/today` — joins to find today's template
+        (sorted by schedule id ASC, take first if multiple), reads
+        the user's active in-progress session id, hydrates exercise
+        names in one batch.
+      * `POST /api/workout-sessions` — rejects if an in-progress
+        session already exists (409 `ACTIVE_SESSION_EXISTS`); rejects
+        an unknown or another-user's template (404 `TEMPLATE_NOT_FOUND`);
+        creates the session and seeds `session_exercises` from the
+        template's slots in one transaction. `target_weight` left
+        null — we don't try to parse "80 kg" into a numeric; the user
+        enters real per-set weights anyway.
+    Cross-row "at most one in_progress per user" rule lives in the
+    service, not the schema (a CHECK across rows isn't practical in
+    standard SQL). The partial index `idx_workout_sessions_user_active`
+    from AH-030 keeps that lookup cheap.
+    Testability: new `Clock` bean in `WebConfig` so
+    `TrainingTodayAndStartIT` can pin "today" via a fixed-clock
+    `@TestConfiguration` — the test always sees Wed 2026-05-27 so
+    weekday-dependent assertions aren't flaky on CI.
+    `TrainingTodayAndStartIT` 11/11 (2.7 s): rest day, planned
+    template returns full exercises in order, today ignores templates
+    scheduled on other days, today ignores another user's
+    today-scheduled template, today reports active session id when
+    one is in progress; start without template → empty session,
+    start with template → seeded in order with names, double-start
+    → 409, unknown template → 404, another user's template → 404,
+    no token → 401. Full suite: **83/83** (12 ITs + 3 unit).
+  - **Next:** **AH-033 — log sets + finish session**: PATCH
+    `/api/workout-sessions/{id}` to append/update/complete sets;
+    POST `/api/workout-sessions/{id}/finish` to compute
+    `total_volume_kg` + `total_sets`, detect e1RM / max-weight PRs,
+    upsert `personal_records`, flip status to `completed`.

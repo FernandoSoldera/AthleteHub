@@ -29,5 +29,9 @@ public enum MessageCode {
     INVALID_OAUTH_TOKEN,
 
     // Training (EPIC 3 — AH-031)
-    EXERCISE_ALREADY_EXISTS
+    EXERCISE_ALREADY_EXISTS,
+
+    // Training (EPIC 3 — AH-032)
+    ACTIVE_SESSION_EXISTS,
+    TEMPLATE_NOT_FOUND
 }
