@@ -72,7 +72,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
 | AH-030 | Schema: exercises, templates, sessions, session_exercises, sets, cardio, PRs | DONE | AH-010 |
-| AH-031 | Exercise catalog endpoints + seed | TODO | AH-030 |
+| AH-031 | Exercise catalog endpoints + seed | DONE | AH-030 |
 | AH-032 | Today's plan + start session | TODO | AH-031 |
 | AH-033 | Log/complete sets + finish session (volume, PR detection) | TODO | AH-032 |
 | AH-034 | Cardio logging (run/walk/cycle) | TODO | AH-030 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 18 done / 47. **Epic 1 + Epic 2 fully closed; Epic 3 (Training) started with AH-030 schema.**
+**Progress:** 19 done / 47. **Epic 1 + Epic 2 fully closed; Epic 3 (Training) 2/7 — schema + exercise catalog.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -395,8 +395,47 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     delete RESTRICT, template delete SET NULL. Full backend suite still
     green: **62/62** (10 ITs + 3 unit). `assignment_id` and the FK
     constraint will land alongside the assignments table in Epic 7.
-  - **Next:** **AH-031 — exercise catalog**: `GET /api/v1/exercises?q=`
-    (global + user-custom), `POST /api/v1/exercises` for custom rows,
-    plus a seed migration with the starter list (bench, squat, etc.).
-    JPA entities + repos + service + controller + IT covering search,
-    self-create, and the global/custom visibility split.
+  - **AH-031 DONE** — exercise catalog. Flyway seed migration
+    `V20260528160000__seed_global_exercises.sql` loads 34 global
+    exercises across 4 categories (push / pull / legs / core) with
+    `is_global = true` and `created_by = NULL` — the XOR constraint
+    from AH-030 keeps customs and globals from leaking into each other.
+    JPA `Exercise` entity + `ExerciseRepository` + `ExerciseService` +
+    `ExerciseController` + `CreateExerciseRequest` + `ExerciseDto` +
+    new `EXERCISE_ALREADY_EXISTS` message code.
+    Endpoints (auth required, all under existing `/api`-no-`v1`
+    convention — see deviation note below):
+      * `GET /api/exercises?q=&cursor=&limit=` — globals + caller's
+        own customs only; substring match on lower(name); cursor on
+        id ASC with the `limit + 1` trick.
+      * `POST /api/exercises` — stamps `is_global = false`,
+        `created_by = caller`; rejects duplicate names per-user
+        (case-insensitive) but allows naming a custom after a global
+        (intentional — users can fork a catalog lift with their own
+        notes/equipment).
+    Sharp edges encountered + fixed:
+      * **Postgres can't type-infer `null` inside `CONCAT('%', :q, '%')`** —
+        it lands on `lower(bytea)` which doesn't exist. Split the
+        repository into `searchVisible` (no name filter) and
+        `searchVisibleByName` (with one) so we never pass null for
+        `:q`. Cleaner than casting or COALESCE-ing in JPQL.
+      * `DefaultUriBuilderFactory` in tests re-encodes pre-encoded
+        URL params (`%20` → `%2520`), so the test helper now uses
+        URI templates + a vars map and lets the builder do the
+        encoding once.
+    `ExerciseCatalogIT` 10/10: seed loaded ≥30 globals, 401 without
+    auth, case-insensitive substring match, blank query returns full
+    catalog (whitespace-only trimmed to "no filter"), cursor walks
+    pages without overlap, custom is owner-visible only, same-name
+    duplicate within user → 409, same name across users → both 201,
+    custom can shadow a global name, blank name → 400 with
+    `VALIDATION_FAILED`. Full suite: **72/72** (11 ITs + 3 unit).
+    **Path convention deviation:** epic spec says `/api/v1/exercises`
+    but every endpoint in this codebase is unversioned, so we kept it
+    `/api/exercises`. When versioning eventually lands, it's an
+    across-the-board change rather than one rogue family.
+  - **Next:** **AH-032 — today's plan + start session**: `GET
+    /api/training/today` (planned session from template/assignment as
+    the hero-card payload) and `POST /api/workout-sessions` to start
+    a session in `in_progress`, seeding `session_exercises` from the
+    plan. Uses the schema already in place.

@@ -26,5 +26,8 @@ public enum MessageCode {
     INVALID_RESET_CODE,
 
     // Identity / social login (EPIC 1 — AH-015)
-    INVALID_OAUTH_TOKEN
+    INVALID_OAUTH_TOKEN,
+
+    // Training (EPIC 3 — AH-031)
+    EXERCISE_ALREADY_EXISTS
 }
