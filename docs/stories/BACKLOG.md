@@ -77,7 +77,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-033 | Log/complete sets + finish session (volume, PR detection) | DONE | AH-032 |
 | AH-034 | Cardio logging (run/walk/cycle) | DONE | AH-030 |
 | AH-035 | Recent sessions + weekly cardio summary | DONE | AH-033, AH-034 |
-| AH-036 | Client: Train, live Workout (rest timer), Cardio screens + service | TODO | AH-033, AH-017 |
+| AH-036 | Client: Train, live Workout (rest timer), Cardio screens + service | DONE | AH-033, AH-017 |
 
 ### EPIC 4 — Body / Evolution · [epic-4-body-evolution.md](epic-4-body-evolution.md)
 | ID | Story | Status | Depends on |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 23 done / 47. **Epic 1 + Epic 2 fully closed; Epic 3 backend done (6/7) — only AH-036 (Flutter client) remains to close the epic.**
+**Progress:** 24 done / 47. **Epic 1, Epic 2, Epic 3 all fully closed. Epic 4 (Body / Evolution) is next.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -609,14 +609,73 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     profile zone and recomputes the Monday boundary. For MVP this
     is acceptable — every user sees a stable weekly window relative
     to the server.
-  - **Next:** **AH-036 — Flutter client: Train / Workout / Cardio**.
-    Closes Epic 3.
-    Roughly: `services/api/training_api_service.dart` covering
-    today, weekly-summary, start/patch/finish session, recent
-    sessions, list+create cardio; `screens/train_screen.dart` (today
-    hero card with Start/Resume CTA, weekly cardio chart via
-    `fl_chart`, recent sessions list); `screens/workout_screen.dart`
-    (live session: exercise list, set rows with weight/reps/done,
-    client-side rest timer, running volume estimate, finish);
-    `screens/cardio_screen.dart` (run/walk/cycle form). Plain
-    `setState`; online-first with loading/error/empty states.
+  - **AH-036 DONE** — Flutter Train / Workout / Cardio. **Closes
+    Epic 3.** Backend gap fixed first: added `GET
+    /api/workout-sessions/{id:\\d+}` (full hydrated session) so the
+    live-workout screen has something to load on Resume — reuses
+    the existing `hydrateSession` helper in `TrainingService`.
+    `LogSetsAndFinishIT` grew 2 cases → **18/18**, full suite
+    **124/124**.
+    Client work:
+      * **9 models** mirroring the backend DTOs: `TemplateExercise`,
+        `WorkoutTemplate`, `TodayPlanResponse`, `ExerciseSet`,
+        `SessionExercise`, `WorkoutSession`, `WorkoutSessionSummary`,
+        `WeeklySummary`, `CardioActivity`. Manual `fromJson` per
+        CONVENTIONS (no codegen).
+      * **`services/api/training_api_service.dart`** — `today()`,
+        `weeklySummary()`, `recentSessions()`, `getSession()`,
+        `startSession()`, `patchSession()`, `finishSession()`,
+        `listCardio()`, `createCardio()`. All through
+        `HttpInterceptor` so 401 → silent refresh + retry.
+      * **`screens/train_screen.dart`** — three-state hero card
+        keyed off `TodayPlanResponse`:
+          - `activeSessionId != null` → "Resume" CTA
+          - `template != null && no active` → "Start <name>" + chip
+            row of exercises
+          - both null → "Rest day" + freestyle CTA
+        Weekly cardio bar chart via `fl_chart` (this week vs last
+        week) with a signed delta chip. Recent-sessions list (up to
+        10) reads the slim summary endpoint. AppBar action opens
+        CardioScreen. Pull-to-refresh re-fetches all three calls
+        in parallel via `Future.wait`.
+      * **`screens/workout_screen.dart`** — live workout. Per-set
+        rows have inline weight + reps fields, a "done" checkbox,
+        and a trash icon. Each interaction queues a granular PATCH
+        op (`upsert`/`delete`); ops are coalesced so an over-eager
+        tap doesn't fan out 5 in-flight requests; on `ApiException`
+        we re-`GET` the session to reconcile. Tapping "done" starts
+        a **client-side rest timer** (90 s default; skip button on
+        the chip). Header shows running volume + done/total set
+        ratio + a progress bar. Finish posts to backend then shows
+        a bottom-sheet summary (total volume, sets, PR count,
+        duration formatted mm:ss); PR-flagged sets get a trophy
+        icon when the server returns the flagged DTO.
+      * **`screens/cardio_screen.dart`** — segmented run/walk/cycle
+        picker, distance (km) + duration (min) required, optional
+        avg/max HR, elevation, kcal, notes. Distance is converted
+        to metres + duration to seconds before POSTing so the
+        backend speaks its own unit. Per-field error map from the
+        backend's `VALIDATION_FAILED` envelope surfaces inline.
+      * **`main_shell.dart`** — Train tab now hosts `TrainScreen`
+        (replaces placeholder).
+    `flutter analyze` clean; `flutter test` 2/2.
+    Design choices captured:
+      * **PATCH op coalescing** in `WorkoutScreen` — a single
+        `_patching` flag plus a `_pendingOps` queue means rapid
+        taps batch into one request; the loop drains the queue
+        before clearing the flag.
+      * **Optimistic UX**: the set row's text fields and checkbox
+        update local state, then queue the op; the server's
+        returned `WorkoutSession` becomes the source of truth on
+        response. `_SetRow.didUpdateWidget` reflects server-side
+        changes that aren't the user's own typing.
+      * **Rest timer is purely client-side** per the epic spec — no
+        server endpoint, no persistence across app kills.
+      * Three-state hero card derives entirely from the
+        `TodayPlanResponse` shape, no extra client state.
+  - **Next:** **Epic 4 (Body / Evolution)** opens with **AH-040**:
+    schema for `evaluations` + `evaluation_measurements` (13
+    circumferences + 8 skinfolds, extensible). Then AH-041 (save
+    evaluation + body-fat computation), AH-042 (body overview +
+    metric series with 4w/12w/6m/1y ranges), AH-043 (Flutter:
+    Evolution, New Evaluation manikin, Graph detail).

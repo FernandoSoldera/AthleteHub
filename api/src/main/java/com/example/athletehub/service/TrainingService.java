@@ -213,6 +213,22 @@ public class TrainingService {
         return toSessionDto(session, seeded, Map.of());
     }
 
+    // ── AH-036 support — fetch a single hydrated session ──────────────────
+
+    /**
+     * Full hydrated view of a single session (exercises + sets). Used by
+     * the live-workout screen on entry (Start → fresh session DTO; Resume
+     * → re-fetch the in-progress session). 404 if the session doesn't
+     * exist or belongs to someone else.
+     */
+    @Transactional(readOnly = true)
+    public WorkoutSessionDto getSession(Long userId, Long sessionId) {
+        WorkoutSession session = ownedSessionOrThrow(userId, sessionId);
+        List<SessionExercise> sessionExercises =
+                sessionExerciseRepository.findBySessionIdOrderByPositionAsc(sessionId);
+        return hydrateSession(session, sessionExercises);
+    }
+
     // ── AH-033 — patch session (set ops) ──────────────────────────────────
 
     @Transactional

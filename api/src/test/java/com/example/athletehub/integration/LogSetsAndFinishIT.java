@@ -329,6 +329,41 @@ class LogSetsAndFinishIT extends AbstractIntegrationTest {
                 .isEqualTo(MessageCode.SESSION_NOT_FOUND.name());
     }
 
+    // ── GET single session ───────────────────────────────────────────────
+
+    @Test
+    void get_returns_full_hydrated_session_with_exercises_and_sets() {
+        patch(aliceToken, sessionId, List.of(
+                Map.of("op", "upsert", "sessionExerciseId", benchSeId, "setNumber", 1,
+                        "weightKg", 80, "reps", 8, "done", true)));
+
+        ResponseEntity<String> response = rest.exchange(
+                "/api/workout-sessions/" + sessionId,
+                HttpMethod.GET,
+                new HttpEntity<>(null, bearer(aliceToken)),
+                String.class);
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+
+        JsonNode dto = json(response.getBody());
+        assertThat(dto.get("id").asLong()).isEqualTo(sessionId);
+        assertThat(dto.get("status").asText()).isEqualTo("in_progress");
+        // Bench has the set we just logged; OHP is empty.
+        assertThat(findExerciseSets(dto, benchSeId).size()).isEqualTo(1);
+        assertThat(findExerciseSets(dto, ohpSeId).size()).isZero();
+    }
+
+    @Test
+    void get_on_another_users_session_returns_404() {
+        ResponseEntity<String> response = rest.exchange(
+                "/api/workout-sessions/" + sessionId,
+                HttpMethod.GET,
+                new HttpEntity<>(null, bearer(bobToken)),
+                String.class);
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        assertThat(json(response.getBody()).get("code").asText())
+                .isEqualTo(MessageCode.SESSION_NOT_FOUND.name());
+    }
+
     @Test
     void finish_without_token_returns_401() {
         ResponseEntity<String> response = rest.exchange(

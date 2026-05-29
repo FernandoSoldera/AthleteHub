@@ -62,6 +62,12 @@ public class TrainingController {
         return trainingService.listRecentSessions(currentUserId(authentication), cursor, clampLimit(limit));
     }
 
+    @GetMapping("/workout-sessions/{id:\\d+}")
+    public WorkoutSessionDto getSession(Authentication authentication,
+                                        @PathVariable("id") Long id) {
+        return trainingService.getSession(currentUserId(authentication), id);
+    }
+
     @PostMapping("/workout-sessions")
     @ResponseStatus(HttpStatus.CREATED)
     public WorkoutSessionDto startSession(Authentication authentication,

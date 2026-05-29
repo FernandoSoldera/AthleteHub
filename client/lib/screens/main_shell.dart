@@ -5,6 +5,7 @@ import '../services/secure_storage_service.dart';
 import 'find_people_screen.dart';
 import 'placeholder_screen.dart';
 import 'profile_screen.dart';
+import 'train_screen.dart';
 
 /// Athlete app shell with five bottom tabs. Coach mode (a different tab set)
 /// arrives in EPIC 7 (AH-075). Most tabs are still placeholders until their
@@ -54,7 +55,7 @@ class _MainShellState extends State<MainShell> {
         index: _index,
         children: [
           _FeedTab(title: tabs[0].label, icon: tabs[0].icon),
-          PlaceholderScreen(title: tabs[1].label, icon: tabs[1].icon),
+          const TrainScreen(),
           PlaceholderScreen(title: tabs[2].label, icon: tabs[2].icon),
           PlaceholderScreen(title: tabs[3].label, icon: tabs[3].icon),
           _MeTab(
