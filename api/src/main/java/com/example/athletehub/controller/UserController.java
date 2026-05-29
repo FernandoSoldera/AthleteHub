@@ -1,7 +1,9 @@
 package com.example.athletehub.controller;
 
 import com.example.athletehub.dto.CursorPage;
+import com.example.athletehub.dto.PublicProfileResponse;
 import com.example.athletehub.dto.PublicUserDto;
+import com.example.athletehub.dto.SuggestedUserDto;
 import com.example.athletehub.dto.SwitchRoleRequest;
 import com.example.athletehub.dto.UpdateProfileRequest;
 import com.example.athletehub.dto.UserDto;
@@ -56,14 +58,17 @@ public class UserController {
     }
 
     // ── follow graph ───────────────────────────────────────────────────────
+    //
+    // The {id:\\d+} regex constraints below ensure the follow routes can't
+    // capture a handle (like "alex.lifts") that arrives at /api/users/{handle}.
 
-    @PostMapping("/users/{id}/follow")
+    @PostMapping("/users/{id:\\d+}/follow")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void followUser(Authentication authentication, @PathVariable("id") Long id) {
         followService.follow(currentUserId(authentication), id);
     }
 
-    @DeleteMapping("/users/{id}/follow")
+    @DeleteMapping("/users/{id:\\d+}/follow")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void unfollowUser(Authentication authentication, @PathVariable("id") Long id) {
         followService.unfollow(currentUserId(authentication), id);
@@ -81,6 +86,31 @@ public class UserController {
                                                  @RequestParam(value = "cursor", required = false) Long cursor,
                                                  @RequestParam(value = "limit", defaultValue = "20") int limit) {
         return followService.listFollowing(currentUserId(authentication), cursor, clampLimit(limit));
+    }
+
+    // ── AH-022 — find people ──────────────────────────────────────────────
+
+    @GetMapping("/users/search")
+    public CursorPage<PublicUserDto> searchUsers(Authentication authentication,
+                                                 @RequestParam("q") String q,
+                                                 @RequestParam(value = "cursor", required = false) Long cursor,
+                                                 @RequestParam(value = "limit", defaultValue = "20") int limit) {
+        return userService.searchUsers(currentUserId(authentication), q, cursor, clampLimit(limit));
+    }
+
+    @GetMapping("/users/suggestions")
+    public CursorPage<SuggestedUserDto> suggestions(Authentication authentication,
+                                                    @RequestParam(value = "cursor", required = false) Long cursor,
+                                                    @RequestParam(value = "limit", defaultValue = "20") int limit) {
+        return userService.suggestions(currentUserId(authentication), cursor, clampLimit(limit));
+    }
+
+    // ── AH-023 — public profile by handle ─────────────────────────────────
+
+    @GetMapping("/users/{handle}")
+    public PublicProfileResponse profileByHandle(Authentication authentication,
+                                                 @PathVariable("handle") String handle) {
+        return userService.getProfileByHandle(currentUserId(authentication), handle);
     }
 
     // ── helpers ────────────────────────────────────────────────────────────

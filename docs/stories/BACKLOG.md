@@ -64,8 +64,8 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 |----|-------|--------|-----------|
 | AH-020 | Schema: follows, user_counters | DONE | AH-010 |
 | AH-021 | Follow/unfollow, followers/following | DONE | AH-020 |
-| AH-022 | Find people (search) + suggestions | TODO | AH-021 |
-| AH-023 | Public profile aggregate endpoint | TODO | AH-021 |
+| AH-022 | Find people (search) + suggestions | DONE | AH-021 |
+| AH-023 | Public profile aggregate endpoint | DONE | AH-021 |
 | AH-024 | Client: Find People + Profile screens, follow button | TODO | AH-023, AH-017 |
 
 ### EPIC 3 — Training · [epic-3-training.md](epic-3-training.md)
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 14 done / 47. **Epic 1 fully closed; Epic 2 started.**
+**Progress:** 16 done / 47. **Epic 1 fully closed; Epic 2 backend almost done (AH-024 client remains).**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -321,5 +321,27 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     last page" from "more remain" — fetch `limit + 1`, the extra row is the
     has-more signal. `CursorPage<T>` and `PublicUserDto` (public-safe shape:
     id, fullName, handle, avatarHue, bio) introduced as reusable envelopes.
-  - **Next:** AH-022 (find people search + suggestions) → AH-023 (public
-    profile aggregate by handle).
+  - **AH-022 + AH-023 DONE.** Find people (search + suggestions) and public
+    profile aggregate.
+    `GET /api/users/search?q&cursor&limit` — case-insensitive partial match
+    on `full_name` and `handle` (LOWER(...) LIKE LOWER(CONCAT('%', :q, '%'))),
+    excludes self, empty query → empty page, cursor walks id-DESC.
+    `GET /api/users/suggestions?cursor&limit` — users I don't follow yet,
+    each annotated with a `mutualCount` (users I follow that the candidate
+    also follows, via a correlated JPQL subquery — no extra round trips, fed
+    by a `JpaRepository @Query` returning the `SuggestedUserDto` constructor
+    expression directly).
+    `GET /api/users/{handle}` — `PublicProfileResponse { user, followers,
+    following, iFollow }` reads from `user_counters` so a profile open is
+    one row + one follow check; `iFollow` is forced false when the viewer
+    asks for their own profile.
+    `SearchAndProfileIT` 10/10: partial-name + partial-handle search excludes
+    self, empty `?q=` returns an empty page, 401 without a token; suggestions
+    exclude self + already-followed; mutual count is correct for the AND of
+    two follow sets; profile reflects counters + iFollow true after follow,
+    iFollow false otherwise, iFollow false for self, 404 on unknown handle.
+    One sharp edge: `/api/users/{id}/follow` and `/api/users/{handle}` would
+    overlap — the follow routes now use `{id:\\d+}` so a handle like
+    `alice.lifts` reaches the profile endpoint, not a Long-conversion error.
+  - **Next:** **AH-024 — client: Find People + Profile screens + follow
+    button** (Flutter). Closes Epic 2.
