@@ -83,7 +83,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
 | AH-040 | Schema: evaluations, evaluation_measurements | DONE | AH-010 |
-| AH-041 | Save evaluation + measurements + body-fat computation | TODO | AH-040 |
+| AH-041 | Save evaluation + measurements + body-fat computation | DONE | AH-040 |
 | AH-042 | Body overview + metric series (weight/arm/waist/bench, ranges) | TODO | AH-041 |
 | AH-043 | Client: Evolution, New Evaluation (manikin), Graph detail + service | TODO | AH-042, AH-017 |
 
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 25 done / 47. **Epic 1–3 fully closed; Epic 4 (Body / Evolution) opened with AH-040 schema.**
+**Progress:** 26 done / 47. **Epic 1–3 fully closed; Epic 4 (Body / Evolution) 2/4 — schema + save evaluation w/ J-P 7-site, Navy, manual body-fat.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -727,10 +727,102 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     UNIQUE per (eval, point) blocks dupes, evaluation → measurement
     cascade, user → evaluation cascade. Full backend suite: **134/134**
     (17 ITs + 3 unit).
-  - **Next:** **AH-041 — save evaluation + body-fat computation**:
-    `POST /api/evaluations` with `{evaluatedAt?, weightKg, notes?,
-    measurements: [...]}` and optional `bfMethod` to request server-
-    side computation (Jackson-Pollock 7-site or Durnin from the
-    skinfold values; Navy from circumferences; `manual` accepts a
-    `bodyFatPct` field as-is). `GET /api/evaluations/{id}` returns
-    the hydrated payload.
+  - **AH-040 follow-up: `users.sex` column.** New Flyway migration
+    `V20260529140000__add_user_sex.sql` adds a nullable `users.sex`
+    column with `CHECK (sex IS NULL OR sex IN ('male', 'female'))`.
+    Nullable so existing users land with NULL; new users can omit
+    at signup and add later via PATCH /me. Binary value set is a
+    measurement constraint, not a social one — J-P / Durnin / Navy
+    formulas have different equations per biological sex. A future
+    social-gender feature would land on a separate column.
+    Plumbed across the stack: `User` entity, `UserDto`,
+    `SignupRequest` (+ optional `@Pattern`), `UpdateProfileRequest`,
+    `AuthService.register` (passes through, null when omitted),
+    `UserService.updateProfile` (null-means-leave-it). Client:
+    `models/user_response.dart` round-trips it through secure
+    storage + `/api/me`. `RegisterIT` +2 (round-trip; invalid → 400
+    VALIDATION_FAILED), `ProfileIT` +1 (set + persist; invalid →
+    400, prior value stays). Suite: 137/137.
+  - **AH-041 DONE** — save evaluation + body-fat computation. Two
+    endpoints:
+      * **`POST /api/evaluations`** with body
+        `{evaluatedAt?, weightKg, bfMethod?, bodyFatPct?, notes?,
+        measurements: [...]}`. Three creation shapes are valid:
+          1. **Weight-only** — `bfMethod` absent → row stored with
+             `body_fat_pct` + `bf_method` both null; the schema XOR
+             rule is satisfied. Measurements are still stored when
+             supplied so the Evolution time-series graphs always
+             have data.
+          2. **Manual** — `bfMethod = "manual"` + `bodyFatPct`
+             supplied → pass-through. Missing `bodyFatPct` → 400
+             `BF_MANUAL_REQUIRES_PCT`.
+          3. **Computed** — `bfMethod ∈ {jackson_pollock_7, navy}` →
+             server computes from the user's profile + measurements
+             via `BodyFatCalculator`. Missing required inputs →
+             400 `BF_MISSING_MEASUREMENTS` (no chest skinfold for
+             J-P 7) or `BF_MISSING_USER_FIELD` (sex/age/height not
+             set on /me).
+        `durnin` is reserved by the schema CHECK but the service
+        rejects it with 400 `BF_METHOD_NOT_SUPPORTED` — Durnin &
+        Womersley 1974 has age-bracket coefficients that bloat the
+        code without much MVP value; lands in a follow-up.
+        Duplicate `pointId` inside one payload → 400
+        `VALIDATION_FAILED` (caught service-side so the user sees
+        a friendly code instead of a 500 from the UNIQUE constraint).
+      * **`GET /api/evaluations/{id:\\d+}`** — hydrated payload
+        (evaluation + ordered measurements). 404
+        `EVALUATION_NOT_FOUND` on someone else's row (don't
+        disclose existence).
+    Body-fat formula notes (encoded in `BodyFatCalculator`):
+      * **Jackson-Pollock 7-site (Siri)** — requires the canonical
+        7 skinfold points: chest, abdomen, thigh, tricep,
+        subscapular, suprailiac, midaxillary (all `kind=skinfold,
+        unit=mm`). Body density per sex/age, then `BF% = 495/BD −
+        450`. Output clamped to [0, 100] and scale-2 to round-trip
+        cleanly with `NUMERIC(5,2)`.
+      * **Navy (Hodgdon-Beckett, cm form + Siri)** — male needs
+        neck + waist; female needs neck + waist + hip; both need
+        `users.heightCm`. Uses the **cm body-density form** fed
+        straight into Siri:
+        `BF% = 495 / D − 450`, where
+        `D_male = 1.0324 − 0.19077·log10(waist−neck) +
+        0.15456·log10(height)` and
+        `D_female = 1.29579 − 0.35004·log10(waist+hip−neck) +
+        0.22100·log10(height)`.
+        **Sharp edge captured the first time around:** mixing the
+        inch coefficients with cm inputs overshoots wildly (a
+        normal-bodied woman read as ~52% body fat). The cm form
+        above is calibrated for cm and produces sane numbers
+        (~10% for the male sample, ~25% for the female sample).
+        The class JavaDoc warns future-me.
+    Files: `model/{Evaluation, EvaluationMeasurement}`,
+    `repository/{Evaluation, EvaluationMeasurement}Repository`,
+    `dto/{EvaluationDto, EvaluationMeasurementDto,
+    CreateEvaluationRequest, EvaluationMeasurementRequest}`,
+    `service/{EvaluationService, BodyFatCalculator}` (calculator
+    is Spring-free for unit-test ergonomics),
+    `controller/EvaluationController`, +5 `MessageCode` values.
+    `EvaluationsIT` 17/17 (15 s): weight-only persists with bf
+    fields null + still stores measurements when supplied; manual
+    passes through + rejects missing pct; J-P 7 computes from
+    skinfolds + age + sex + rejects missing skinfold + rejects
+    missing user sex; Navy male computes correctly; Navy female
+    requires hip and computes when given; Navy without heightCm
+    → 400; Durnin → 400 BF_METHOD_NOT_SUPPORTED; unknown bfMethod
+    → 400 VALIDATION_FAILED; duplicate pointId → 400; no token →
+    401; GET own + GET another user's (404) + GET unknown (404).
+    Full backend suite: **154/154** (18 ITs + 3 unit).
+  - **Sidebar — exercise-search query split (touched in this commit
+    if dirty).** The original `ExerciseRepository.searchVisible`
+    JPQL wrapped `:q` in a `CONCAT('%', :q, '%')`; when the service
+    passed `null` for an empty query, PostgreSQL's type inference
+    landed on `lower(bytea)` which doesn't exist. Fix: split into
+    `searchVisible` (no name filter) and `searchVisibleByName`
+    (the LIKE branch). Service picks based on whether `q` is null.
+    No behavior change for callers; tests still 10/10.
+  - **Next:** **AH-042 — body overview + metric series**:
+    `GET /api/evaluations` (recent list, cursor-paginated) and
+    `GET /api/evaluations/metric-series?metric=weight|arm_r|waist
+    |bench&range=4w|12w|6m|1y` (time-series derived at read time
+    from `evaluations` + `evaluation_measurements`, plus
+    `personal_records` for bench 1RM).
