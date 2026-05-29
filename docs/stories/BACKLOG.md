@@ -66,7 +66,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-021 | Follow/unfollow, followers/following | DONE | AH-020 |
 | AH-022 | Find people (search) + suggestions | DONE | AH-021 |
 | AH-023 | Public profile aggregate endpoint | DONE | AH-021 |
-| AH-024 | Client: Find People + Profile screens, follow button | TODO | AH-023, AH-017 |
+| AH-024 | Client: Find People + Profile screens, follow button | DONE | AH-023, AH-017 |
 
 ### EPIC 3 — Training · [epic-3-training.md](epic-3-training.md)
 | ID | Story | Status | Depends on |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 16 done / 47. **Epic 1 fully closed; Epic 2 backend almost done (AH-024 client remains).**
+**Progress:** 17 done / 47. **Epic 1 + Epic 2 fully closed. Epic 3 (Training) is next.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -343,5 +343,30 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     One sharp edge: `/api/users/{id}/follow` and `/api/users/{handle}` would
     overlap — the follow routes now use `{id:\\d+}` so a handle like
     `alice.lifts` reaches the profile endpoint, not a Long-conversion error.
-  - **Next:** **AH-024 — client: Find People + Profile screens + follow
-    button** (Flutter). Closes Epic 2.
+  - **AH-024 DONE** — Flutter client: Find People + Profile screens +
+    optimistic follow button. Models: `PublicUser`, `SuggestedUser`,
+    `CursorPage<T>` (generic envelope), `PublicProfileResponse`. Service:
+    `SocialApiService` with `search`, `suggestions`, `profileByHandle`,
+    `follow`, `unfollow`, `myFollowers`, `myFollowing` — all go through
+    `HttpInterceptor` so 401 → silent refresh + retry. Widgets: `Avatar`
+    (initial-based circle tinted by `avatarHue` HSL), `FollowButton`
+    (optimistic flip with revert on `ApiException`, SnackBar on error,
+    filled when not following / outlined when following).
+    Screens: `FindPeopleScreen` (250 ms-debounced search field; loads
+    suggestions when empty, switches to search results when not; shared
+    `_UserRow` with avatar + name + subtitle + follow button; row tap
+    pushes ProfileScreen) and `ProfileScreen` (header with avatar +
+    fullName + @handle + bio, counters row Following/Followers/Sessions,
+    follow button hidden when viewing own profile; pull-to-refresh; the
+    follow-toggle callback adjusts the local followers counter in
+    real-time). Wired `MainShell`: Me tab renders `ProfileScreen` with
+    cached user's handle (via new `SecureStorageService.getCachedUser()`),
+    and the Feed tab AppBar has a `person_search_outlined` action that
+    opens FindPeopleScreen.
+    `flutter analyze` clean (no issues); `flutter test` 2/2 green.
+    **Closes Epic 2 (5/5 stories).** Sessions counter on profile renders
+    a placeholder `—` until AH-036 surfaces it.
+  - **Next:** **Epic 3 (Training)** opens with **AH-030 — schema:
+    exercises, templates, sessions, session_exercises, sets, cardio,
+    PRs** (Flyway migration). After that, AH-031 seeds the exercise
+    catalog, then AH-032/033 plan + log sessions.

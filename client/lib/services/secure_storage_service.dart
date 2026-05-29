@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import '../models/user_response.dart';
 
 /// Token + cached profile storage backed by Keychain (iOS) / EncryptedSharedPrefs
 /// (Android). The access token is short-lived; the refresh token lets us mint a
@@ -43,5 +47,17 @@ class SecureStorageService {
     final access = await getAccessToken();
     final refresh = await getRefreshToken();
     return access != null && refresh != null;
+  }
+
+  /// Parse the cached user JSON if present. Returns null when there's no
+  /// cached profile or the JSON is unparseable (e.g. older app version).
+  static Future<UserResponse?> getCachedUser() async {
+    final raw = await getUserJson();
+    if (raw == null) return null;
+    try {
+      return UserResponse.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
   }
 }

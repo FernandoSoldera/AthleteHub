@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../i18n/app_localizations.dart';
+import '../services/secure_storage_service.dart';
+import 'find_people_screen.dart';
 import 'placeholder_screen.dart';
+import 'profile_screen.dart';
 
 /// Athlete app shell with five bottom tabs. Coach mode (a different tab set)
-/// arrives in EPIC 7 (AH-075). Screens are placeholders until their epic
-/// lands. Extracted from `main.dart` so the login flow can navigate to it.
+/// arrives in EPIC 7 (AH-075). Most tabs are still placeholders until their
+/// epic lands — Me uses [ProfileScreen] with the cached user's handle (AH-024),
+/// the Feed AppBar exposes a search action that opens [FindPeopleScreen].
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
@@ -15,6 +19,23 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _index = 0;
+  String? _myHandle;
+  bool _resolvingHandle = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMyHandle();
+  }
+
+  Future<void> _loadMyHandle() async {
+    final me = await SecureStorageService.getCachedUser();
+    if (!mounted) return;
+    setState(() {
+      _myHandle = me?.handle;
+      _resolvingHandle = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +53,16 @@ class _MainShellState extends State<MainShell> {
       body: IndexedStack(
         index: _index,
         children: [
-          for (final t in tabs) PlaceholderScreen(title: t.label, icon: t.icon),
+          _FeedTab(title: tabs[0].label, icon: tabs[0].icon),
+          PlaceholderScreen(title: tabs[1].label, icon: tabs[1].icon),
+          PlaceholderScreen(title: tabs[2].label, icon: tabs[2].icon),
+          PlaceholderScreen(title: tabs[3].label, icon: tabs[3].icon),
+          _MeTab(
+            fallbackTitle: tabs[4].label,
+            icon: tabs[4].icon,
+            handle: _myHandle,
+            resolving: _resolvingHandle,
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -48,6 +78,77 @@ class _MainShellState extends State<MainShell> {
         ],
       ),
     );
+  }
+}
+
+/// Feed tab with a Find People action in the AppBar — the real feed lands
+/// in AH-064 (EPIC 6).
+class _FeedTab extends StatelessWidget {
+  const _FeedTab({required this.title, required this.icon});
+
+  final String title;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(title),
+        centerTitle: false,
+        actions: [
+          IconButton(
+            tooltip: 'Find people',
+            icon: const Icon(Icons.person_search_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const FindPeopleScreen()),
+            ),
+          ),
+        ],
+      ),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 56, color: cs.primary),
+            const SizedBox(height: 12),
+            Text(title, style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 6),
+            Text('Coming soon', style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Me tab — renders the viewer's own [ProfileScreen] once their handle is
+/// resolved from secure storage. Falls back to the placeholder if the cached
+/// user is missing (shouldn't happen post-login, but keeps the shell safe).
+class _MeTab extends StatelessWidget {
+  const _MeTab({
+    required this.fallbackTitle,
+    required this.icon,
+    required this.handle,
+    required this.resolving,
+  });
+
+  final String fallbackTitle;
+  final IconData icon;
+  final String? handle;
+  final bool resolving;
+
+  @override
+  Widget build(BuildContext context) {
+    if (resolving) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (handle == null) {
+      return PlaceholderScreen(title: fallbackTitle, icon: icon);
+    }
+    return ProfileScreen(handle: handle!);
   }
 }
 
