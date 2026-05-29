@@ -26,6 +26,7 @@ import static org.mockito.Mockito.when;
 class AuthServiceTest {
 
     @Mock UserRepository userRepository;
+    @Mock com.example.athletehub.repository.UserCountersRepository userCountersRepository;
     @Mock PasswordEncoder passwordEncoder;
     @InjectMocks AuthService authService;
 

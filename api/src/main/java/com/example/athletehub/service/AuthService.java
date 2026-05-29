@@ -9,6 +9,8 @@ import com.example.athletehub.enums.Role;
 import com.example.athletehub.exception.ConflictException;
 import com.example.athletehub.exception.InvalidCredentialsException;
 import com.example.athletehub.model.User;
+import com.example.athletehub.model.UserCounters;
+import com.example.athletehub.repository.UserCountersRepository;
 import com.example.athletehub.repository.UserRepository;
 import com.example.athletehub.security.JwtUtil;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ import java.util.Set;
 public class AuthService {
 
     private final UserRepository userRepository;
+    private final UserCountersRepository userCountersRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final RefreshTokenService refreshTokenService;
@@ -60,7 +63,9 @@ public class AuthService {
                 .roles(roles)
                 .build();
 
-        return UserDto.from(userRepository.save(user));
+        User saved = userRepository.save(user);
+        userCountersRepository.save(UserCounters.builder().userId(saved.getId()).build());
+        return UserDto.from(saved);
     }
 
     @Transactional

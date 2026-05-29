@@ -6,7 +6,9 @@ import com.example.athletehub.enums.OAuthProvider;
 import com.example.athletehub.enums.Role;
 import com.example.athletehub.model.OAuthAccount;
 import com.example.athletehub.model.User;
+import com.example.athletehub.model.UserCounters;
 import com.example.athletehub.repository.OAuthAccountRepository;
+import com.example.athletehub.repository.UserCountersRepository;
 import com.example.athletehub.repository.UserRepository;
 import com.example.athletehub.security.JwtUtil;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +39,7 @@ public class SocialAuthService {
 
     private final OAuthTokenVerifier verifier;
     private final UserRepository userRepository;
+    private final UserCountersRepository userCountersRepository;
     private final OAuthAccountRepository oauthAccountRepository;
     private final JwtUtil jwtUtil;
     private final RefreshTokenService refreshTokenService;
@@ -80,7 +83,9 @@ public class SocialAuthService {
                 .handle(generateUniqueHandle(email))
                 .roles(roles)
                 .build();
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        userCountersRepository.save(UserCounters.builder().userId(saved.getId()).build());
+        return saved;
     }
 
     /**

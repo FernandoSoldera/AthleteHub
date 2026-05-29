@@ -62,8 +62,8 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 ### EPIC 2 — Social graph & profile · [epic-2-social-profile.md](epic-2-social-profile.md)
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
-| AH-020 | Schema: follows, user_counters | TODO | AH-010 |
-| AH-021 | Follow/unfollow, followers/following | TODO | AH-020 |
+| AH-020 | Schema: follows, user_counters | DONE | AH-010 |
+| AH-021 | Follow/unfollow, followers/following | DONE | AH-020 |
 | AH-022 | Find people (search) + suggestions | TODO | AH-021 |
 | AH-023 | Public profile aggregate endpoint | TODO | AH-021 |
 | AH-024 | Client: Find People + Profile screens, follow button | TODO | AH-023, AH-017 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 12 done / 47. **Epic 1 fully closed.**
+**Progress:** 14 done / 47. **Epic 1 fully closed; Epic 2 started.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -298,5 +298,28 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
   - **Epic 1 is fully closed.** All eight stories (AH-010..017) are DONE; full
     athlete-auth API + Flutter auth flow + token persistence + automatic
     refresh + four screens.
-  - **Next:** **EPIC 2 — Social graph & profile** starting with AH-020
-    (follows + user_counters schema).
+  - **AH-020 + AH-021 DONE.** Social graph foundation. New schema (Flyway
+    `V20260528140000`): `follows` (surrogate id PK + `(follower_id, followee_id)`
+    UNIQUE + `CHECK (follower_id <> followee_id)` + indexes on
+    `(followee_id, id DESC)` and `(follower_id, id DESC)` for cursor scans);
+    `user_counters` (denormalized followers/following/sessions/posts, backfilled
+    for existing users + auto-inserted on register and OAuth signup). `Follow`
+    + `UserCounters` entities; `FollowRepository` with derived
+    `findByFollowerIdAndFolloweeId` + `@Modifying` delete + cursor JPQL;
+    `UserCountersRepository` with atomic `adjustFollowers`/`adjustFollowing`
+    UPDATEs. `FollowService` handles idempotent follow + unfollow inside one tx
+    (counter never moves twice for a no-op call) and exposes
+    `listFollowers`/`listFollowing` with cursor pagination. Endpoints on
+    `UserController`: `POST /api/users/{id}/follow`, `DELETE
+    /api/users/{id}/follow`, `GET /api/me/followers?cursor&limit`, `GET
+    /api/me/following?cursor&limit` (limit clamped 1–100). `FollowIT` 6/6:
+    follow + unfollow + idempotent re-follow + idempotent re-unfollow with
+    counters consistent; cannot follow yourself (400); unknown target (404);
+    unauthenticated (401); followers/following list reflects the graph; cursor
+    pagination walks pages and reports no-more correctly. One sharp edge:
+    naive "items == limit → next page exists" can't distinguish "exactly limit,
+    last page" from "more remain" — fetch `limit + 1`, the extra row is the
+    has-more signal. `CursorPage<T>` and `PublicUserDto` (public-safe shape:
+    id, fullName, handle, avatarHue, bio) introduced as reusable envelopes.
+  - **Next:** AH-022 (find people search + suggestions) → AH-023 (public
+    profile aggregate by handle).
