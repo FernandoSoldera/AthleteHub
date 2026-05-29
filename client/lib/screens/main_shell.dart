@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../i18n/app_localizations.dart';
 import '../services/secure_storage_service.dart';
+import 'evolution_screen.dart';
 import 'find_people_screen.dart';
 import 'placeholder_screen.dart';
 import 'profile_screen.dart';
@@ -56,7 +57,7 @@ class _MainShellState extends State<MainShell> {
         children: [
           _FeedTab(title: tabs[0].label, icon: tabs[0].icon),
           const TrainScreen(),
-          PlaceholderScreen(title: tabs[2].label, icon: tabs[2].icon),
+          const EvolutionScreen(),
           PlaceholderScreen(title: tabs[3].label, icon: tabs[3].icon),
           _MeTab(
             fallbackTitle: tabs[4].label,

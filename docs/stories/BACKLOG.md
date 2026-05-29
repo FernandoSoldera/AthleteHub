@@ -85,7 +85,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-040 | Schema: evaluations, evaluation_measurements | DONE | AH-010 |
 | AH-041 | Save evaluation + measurements + body-fat computation | DONE | AH-040 |
 | AH-042 | Body overview + metric series (weight/arm/waist/bench, ranges) | DONE | AH-041 |
-| AH-043 | Client: Evolution, New Evaluation (manikin), Graph detail + service | TODO | AH-042, AH-017 |
+| AH-043 | Client: Evolution, New Evaluation (manikin), Graph detail + service | DONE | AH-042, AH-017 |
 
 ### EPIC 5 — Nutrition · [epic-5-nutrition.md](epic-5-nutrition.md)
 | ID | Story | Status | Depends on |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 27 done / 47. **Epic 1–3 fully closed; Epic 4 backend done (3/4) — only AH-043 (Flutter client) remains to close the epic.**
+**Progress:** 28 done / 47. **Epics 1–4 all fully closed. Epic 5 (Nutrition) is next.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -885,13 +885,83 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
         between users; invalid range → 400 `INVALID_RANGE`; no
         token → 401.
     Full backend suite: **167/167** (19 ITs + 3 unit).
-  - **Next:** **AH-043 — Flutter client: Evolution / New Evaluation /
-    Graph detail.** Closes Epic 4. Roughly:
-    `services/api/evaluation_api_service.dart` (today's overview
-    via list + last-summary, create, get, list paginated, metric
-    series), `screens/evolution_screen.dart` (latest weight + bf
-    summary + chart picker + recent list), `screens/new_evaluation_screen.dart`
-    (manikin-style body with point taps for circumferences /
-    skinfolds, weight + bf-method form, calls POST /api/evaluations),
-    `screens/graph_detail_screen.dart` (full metric series with
-    range picker). Plain `setState`; online-first.
+  - **AH-043 DONE** — Flutter Evolve / New Evaluation / Graph
+    detail. **Closes Epic 4.** Five models mirror the backend DTOs;
+    one service; three screens; main_shell wired.
+    Files added
+      * `models/responses/{evaluation_measurement,
+        evaluation, evaluation_summary, metric_series}` (5 classes
+        in 4 files — `MetricPoint` + `MetricSeries` share a file).
+      * `services/api/evaluation_api_service.dart` — `listRecent`,
+        `getById`, `create`, `getSeries`. All through
+        `HttpInterceptor` so 401 → silent refresh + retry.
+      * `screens/evolution_screen.dart` — three sections loaded in
+        parallel via two awaited futures:
+          - **Hero stats** card with latest weight + body-fat (when
+            present) + date.
+          - **Weight chart** (4w default) — `fl_chart` mini-line,
+            tappable, opens `GraphDetailScreen('weight', '12w')`.
+          - **Quick chips** for body-fat, waist, right arm — each
+            opens the graph detail with the matching point id.
+          - **Recent evaluations list** (top 10) — slim summary
+            rows.
+        FAB → `NewEvaluationScreen`; pull-to-refresh re-fetches
+        both calls; loading / error / empty states.
+      * `screens/new_evaluation_screen.dart` — bf-method-aware
+        form. Weight required; body-fat method dropdown gates
+        downstream inputs:
+          - **None** → weight-only check-in.
+          - **Manual** → body-fat % field appears.
+          - **Jackson-Pollock 7-site** → 7 skinfold inputs (mm)
+            for chest, abdomen, thigh, tricep, subscapular,
+            suprailiac, midaxillary.
+          - **Navy** → neck + waist (cm); hip added when cached
+            user's `sex == 'female'`.
+        **Profile-gating UX** — when the chosen method needs
+        `users.sex` / `users.age` / `users.heightCm` and the
+        cached `UserResponse` doesn't have them, the section
+        shows an inline red banner ("Set your sex in profile
+        settings first") and `_save` short-circuits with a
+        friendly error. Server still validates as a defense-in-
+        depth.
+        **"Other measurements" section** — bottom-sheet picker
+        with segmented circumference/skinfold and a chip grid of
+        common points + a "Custom point id" text field; honors
+        the schema's free-form `point_id` design. Collection skips
+        point ids already supplied by the method section so the
+        backend's duplicate-point validation doesn't bite the
+        submit.
+      * `screens/graph_detail_screen.dart` — full metric chart
+        with range picker (4w / 12w / 6m / 1y segmented button).
+        Chart is `fl_chart` line with curved interpolation, area
+        fill, and dot markers; below it a list of every point
+        newest-first so users can scan exact values. Loading /
+        error / empty states; ranges reload on change.
+    Files modified
+      * `main_shell.dart` — Evolve tab now hosts `EvolutionScreen`
+        (replaces placeholder).
+    Verification
+      * `flutter analyze` clean (one curly-braces lint fixed
+        first time around).
+      * `flutter test` 2/2 green.
+      * No backend changes — 167/167 still green.
+    Design choices captured
+      * **Profile-gating before submit** — proactive UX. The
+        backend's `BF_MISSING_USER_FIELD` is the source of truth;
+        the client just gets there sooner with a friendlier
+        message.
+      * **Chart x-axis = days since first sample** rather than raw
+        epoch ms because `fl_chart` complains about very large
+        x-values. The visual order is correct; explicit time-axis
+        labels are out of scope (the date list under the chart
+        carries that information).
+      * **Mini-line on Evolve, full line on detail** keeps the
+        Evolve tab fast — only one extra series fetch (weight 4w)
+        beyond the recent list.
+      * **Free-form `point_id` honored end-to-end** — picker
+        offers common points but the custom-field always wins
+        when filled, matching the schema design.
+  - **Next:** **AH-050 — Nutrition schema**:
+    `foods, diet_plans, diet_meals, meal_items, diary_entries,
+    favorites`. Same simplifications pattern as AH-030/040 (skip
+    offline reconciliation, defer coach-assignment FKs).
