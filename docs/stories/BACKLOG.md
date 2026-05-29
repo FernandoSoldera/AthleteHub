@@ -82,7 +82,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 ### EPIC 4 — Body / Evolution · [epic-4-body-evolution.md](epic-4-body-evolution.md)
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
-| AH-040 | Schema: evaluations, evaluation_measurements | TODO | AH-010 |
+| AH-040 | Schema: evaluations, evaluation_measurements | DONE | AH-010 |
 | AH-041 | Save evaluation + measurements + body-fat computation | TODO | AH-040 |
 | AH-042 | Body overview + metric series (weight/arm/waist/bench, ranges) | TODO | AH-041 |
 | AH-043 | Client: Evolution, New Evaluation (manikin), Graph detail + service | TODO | AH-042, AH-017 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 24 done / 47. **Epic 1, Epic 2, Epic 3 all fully closed. Epic 4 (Body / Evolution) is next.**
+**Progress:** 25 done / 47. **Epic 1–3 fully closed; Epic 4 (Body / Evolution) opened with AH-040 schema.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -673,9 +673,64 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
         server endpoint, no persistence across app kills.
       * Three-state hero card derives entirely from the
         `TodayPlanResponse` shape, no extra client state.
-  - **Next:** **Epic 4 (Body / Evolution)** opens with **AH-040**:
-    schema for `evaluations` + `evaluation_measurements` (13
-    circumferences + 8 skinfolds, extensible). Then AH-041 (save
-    evaluation + body-fat computation), AH-042 (body overview +
-    metric series with 4w/12w/6m/1y ranges), AH-043 (Flutter:
-    Evolution, New Evaluation manikin, Graph detail).
+  - **AH-040 DONE** — Body / Evolution foundation. Flyway migration
+    `V20260529130000__create_evaluations_tables.sql` creates two
+    tables per `02-data-model.md §4.5` with the MVP simplifications
+    spelled out in the migration header: no `client_uuid` (online-
+    first), no `body_metric_samples` hypertable (LATER — daily
+    weight from wearables ships with Epic 9 sync), no
+    `assigned_by_coach_id` / `eval_request_id` FKs yet (Epic 7's
+    `assignments` + `eval_requests` tables haven't landed; the
+    `source = 'coach'` enum value is already accepted so the data
+    shape stays forward-compatible).
+    Tables
+      * **`evaluations`** — `weight_kg` required (every assessment
+        captures it); `body_fat_pct` + `bf_method` paired (a body-
+        fat % needs to record how it was computed); both nullable
+        so a "weight-only check-in" is a legal row. `source ∈
+        {self, coach}`.
+      * **`evaluation_measurements`** — one row per
+        `(evaluation_id, point_id)`. `point_id` is a free-form TEXT
+        like `'neck'`, `'chest'`, `'arm_r'`, `'tricep'`, `'suprail'`
+        — new measurement points (a new skinfold site, a per-thigh
+        circumference) don't need a migration. `kind ∈
+        {circumference, skinfold}`; `unit ∈ {cm, mm}`. `UNIQUE
+        (evaluation_id, point_id)` — re-measuring a point is an
+        UPDATE, not an append.
+    Sharp edges encoded as CHECKs:
+      * **Body-fat XOR:** a row has both `body_fat_pct` + `bf_method`
+        or neither — never one without the other.
+      * `bf_method ∈ {jackson_pollock_7, durnin, navy, manual}` when
+        present.
+      * Range checks: `weight_kg ∈ [0, 1000)`, `body_fat_pct ∈
+        [0, 100]` when present, `measurement.value ≥ 0`.
+    Cascade choices:
+      * `evaluations.user_id → ON DELETE CASCADE` (a user's
+        evaluations die with them).
+      * `evaluation_measurements.evaluation_id → ON DELETE CASCADE`
+        (delete an evaluation, lose its measurements).
+    Indexes documented in the spec are both present:
+    `idx_evaluations_user_evaluated (user_id, evaluated_at DESC)`
+    for the Evolution timeline + metric-series graphs, and
+    `idx_evaluation_measurements_eval` so the "load evaluation +
+    its measurements" join is one step out without scanning.
+    **Derived graphs note:** the weight / arm / waist / bench 1RM
+    series (ranges 4w/12w/6m/1y) are derived at read time from
+    `evaluations + evaluation_measurements` (and `personal_records`
+    for bench 1RM) — no "graph" table needed.
+    `EvaluationsSchemaIT` 10/10 (110 ms): tables + indexes present,
+    `bf_method` CHECK rejects unknown, body-fat ↔ method XOR enforced
+    in both directions and both legal shapes (weight-only / fully
+    populated), `source` CHECK rejects unknown ('import') and accepts
+    'coach', weight + body-fat range CHECKs fire, measurement
+    `kind` + `unit` CHECKs reject unknown values, `value ≥ 0`,
+    UNIQUE per (eval, point) blocks dupes, evaluation → measurement
+    cascade, user → evaluation cascade. Full backend suite: **134/134**
+    (17 ITs + 3 unit).
+  - **Next:** **AH-041 — save evaluation + body-fat computation**:
+    `POST /api/evaluations` with `{evaluatedAt?, weightKg, notes?,
+    measurements: [...]}` and optional `bfMethod` to request server-
+    side computation (Jackson-Pollock 7-site or Durnin from the
+    skinfold values; Navy from circumferences; `manual` accepts a
+    `bodyFatPct` field as-is). `GET /api/evaluations/{id}` returns
+    the hydrated payload.
