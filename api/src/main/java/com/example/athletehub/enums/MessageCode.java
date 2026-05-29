@@ -52,5 +52,8 @@ public enum MessageCode {
     INVALID_RANGE,
 
     // Nutrition (EPIC 5 — AH-051)
-    FOOD_ALREADY_EXISTS
+    FOOD_ALREADY_EXISTS,
+
+    // Nutrition (EPIC 5 — AH-052)
+    DIET_PLAN_NOT_FOUND
 }

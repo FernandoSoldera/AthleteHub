@@ -85,6 +85,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
+    /**
+     * Spring's parameter binding fails (e.g. {@code @DateTimeFormat} can't
+     * parse a query-string value) raise this; treat as a 400 validation
+     * error so it doesn't fall through to the catch-all 500.
+     */
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ResponseEntity<ApiResponse> handleParamTypeMismatch(
+            org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error(MessageCode.VALIDATION_FAILED));
+    }
+
     @ExceptionHandler({BadCredentialsException.class, AuthenticationException.class})
     @ResponseStatus(HttpStatus.UNAUTHORIZED)
     public ResponseEntity<ApiResponse> handleAuthentication(Exception ex) {

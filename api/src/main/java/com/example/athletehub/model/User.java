@@ -61,6 +61,16 @@ public class User {
      */
     private String sex;
 
+    /**
+     * The user's currently-active diet plan (AH-052). Nullable — a user
+     * without an active plan still gets meaningful day totals but no
+     * target / remaining numbers. Set via {@code POST /api/diet/active};
+     * exposed only through the diet endpoints (not on {@link
+     * com.example.athletehub.dto.UserDto}).
+     */
+    @Column(name = "active_diet_plan_id")
+    private Long activeDietPlanId;
+
     @Column(nullable = false)
     @Builder.Default
     private String status = "active";

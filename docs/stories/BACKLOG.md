@@ -92,7 +92,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 |----|-------|--------|-----------|
 | AH-050 | Schema: foods, diet_plans, diet_meals, meal_items, diary_entries, favorites | DONE | AH-010 |
 | AH-051 | Food DB search + seed + custom foods | DONE | AH-050 |
-| AH-052 | Active diet plan + day endpoint (totals/remaining) | TODO | AH-050 |
+| AH-052 | Active diet plan + day endpoint (totals/remaining) | DONE | AH-050 |
 | AH-053 | Diary entries (add food to a day) | TODO | AH-051, AH-052 |
 | AH-054 | Client: Diet screen (macro ring, day strip), Add food sheet + service | TODO | AH-052, AH-017 |
 
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 30 done / 47. **Epics 1–4 fully closed; Epic 5 (Nutrition) 2/5 — schema + food catalog with seed + customs.**
+**Progress:** 31 done / 47. **Epics 1–4 fully closed; Epic 5 (Nutrition) 3/5 — schema + food catalog + active plan / day endpoint.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1074,10 +1074,91 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     `CardioActivityIT`/`EvaluationListAndSeriesIT`. That's the
     pattern to use for any future query-string IT helper.
     Full backend suite: **192/192** (21 ITs + 3 unit).
-  - **Next:** **AH-052 — active diet plan + day endpoint**:
-    introduce `users.active_diet_plan_id` (FK) so a user can flag
-    one plan as their current; `GET /api/diet/active` returns it
-    hydrated; `GET /api/diet/day?date=...` aggregates the day's
-    diary entries with macro totals + remaining vs the plan's
-    target (sum across meal items × amount), so the Diet screen
-    can render the macro ring without client-side math.
+  - **AH-052 DONE** — active diet plan + day endpoint. Flyway
+    `V20260529170000__add_user_active_diet_plan.sql` adds
+    `users.active_diet_plan_id BIGINT REFERENCES diet_plans(id)
+    ON DELETE SET NULL`. Nullable on purpose — users without an
+    active plan still get meaningful day totals (just no target /
+    remaining numbers); SET NULL on plan deletion so a plan can be
+    removed without blocking on the user pointer.
+    Three endpoints
+      * **`GET /api/diet/active`** — hydrated active plan
+        (meals → items → food + per-item scaled macros + plan
+        `dailyTarget`) or null when no plan is set.
+      * **`POST /api/diet/active`** — body `{planId}`. Validates
+        plan ownership (404 `DIET_PLAN_NOT_FOUND` for unknown /
+        another-user's plan); null `planId` clears the active
+        pointer. Returns the hydrated plan or null.
+      * **`GET /api/diet/day?date=YYYY-MM-DD`** — payload
+        `{date, entries, totals, target, remaining}`. Date is
+        optional; defaults to today via the `Clock` bean. Entries
+        oldest-first; totals + target + remaining all use the
+        shared `Macros` record so they're comparable element-wise.
+        Remaining can go negative when over target (the chart will
+        render "1200 kcal over").
+    **Macro scaling rule** (encoded in `DietService.scaleMacros`):
+      * `g` / `ml` → `macro = amount × food.macro / food.serving_size_g`.
+        Treats ml as g for now — most macro-relevant liquids
+        (milk, juice, broth) are ~1 g/ml.
+      * `portion` → `macro = amount × food.macro` (one portion =
+        one × serving_size_g).
+    All scale-2 HALF_UP on the way out so JSON ↔ DB ↔ in-memory
+    stays round-trip stable with `NUMERIC(7,2)`. Null macros
+    (fiber/sodium not stored on a food) propagate as null through
+    addition so the wire payload renders dashes rather than
+    misleading zeros — except the day endpoint's totals, which
+    treat absent values as zero for the additive case (you can't
+    eat null fiber).
+    **Sharp edge encoded:** the body-fat XOR rule has a cousin
+    here — `target` and `remaining` are both null or both set, on
+    a "do you have an active plan?" axis. Same pattern as
+    `TodayPlanResponse` from AH-032: four nullable combinations
+    are all real states.
+    **Hydration strategy:** three batched queries (meals,
+    items-IN, foods-IN) instead of N+1 fetches. Plan hydration +
+    target computation share the same pattern; same as training
+    session DTO assembly.
+    **GlobalExceptionHandler** got a new handler:
+    `MethodArgumentTypeMismatchException` → 400 `VALIDATION_FAILED`
+    (Spring's `@DateTimeFormat` binding failure on `?date=not-a-date`
+    was falling through to the catch-all 500). Applies broadly to
+    any query-param type-binding failure.
+    **Plan creation deferred** — same pattern as workout-template
+    CRUD. The IT seeds plans via `JdbcTemplate`. Athlete-side plan
+    creation lands later or with Epic 7 (coach assignments).
+    Files added
+      * `model/{DietPlan, DietMeal, MealItem, DiaryEntry}`
+      * `repository/{DietPlan, DietMeal, MealItem, DiaryEntry}Repository`
+      * `dto/{DietPlanDto, DietMealDto, MealItemDto, DiaryEntryDto,
+        Macros, DayResponse, SetActivePlanRequest}`
+      * `service/DietService`
+      * `controller/DietController`
+      * `enums/MessageCode` +`DIET_PLAN_NOT_FOUND`
+      * `exception/GlobalExceptionHandler` +
+        `MethodArgumentTypeMismatchException` handler
+      * `db/migration/V20260529170000__add_user_active_diet_plan.sql`
+    Files modified
+      * `model/User` — `activeDietPlanId` field (no UserDto exposure)
+    `DietActiveAndDayIT` 16/16 (6 s) using the same fixed-clock
+    `@TestConfiguration` (Wed 2026-05-27):
+      * active — null when no plan set; set then GET returns
+        hydrated plan with per-item macros and `dailyTarget` (200g
+        chicken + 150g rice → 525 kcal, 66.05 g protein); clear by
+        sending null planId; reject another user's plan → 404
+        DIET_PLAN_NOT_FOUND; reject unknown plan → 404; deleting
+        the active plan nulls the user pointer (ON DELETE SET
+        NULL); no token → 401 on GET + POST.
+      * day — empty totals + null target/remaining when no diary
+        + no plan; sums diary entries scaled by unit (200g + 1
+        portion of chicken → 495 kcal); target from active plan;
+        remaining = target − totals; remaining goes negative when
+        over; window boundaries respected (yesterday-23:59 and
+        tomorrow-00:01 excluded); date param defaults to today;
+        no leakage between users; no token → 401; bad date format
+        → 400 VALIDATION_FAILED (via new handler).
+    Full backend suite: **208/208** (22 ITs + 3 unit).
+  - **Next:** **AH-053 — diary entries**: `POST /api/diet/diary`
+    (add food to a day; body `{foodId, amount, unit, mealLabel?,
+    eatenAt?, source?}`), `DELETE /api/diet/diary/{id}` (remove an
+    entry), `GET /api/diet/favorites` + `POST/DELETE` for
+    quick-add. Closes the backend half of Epic 5.
