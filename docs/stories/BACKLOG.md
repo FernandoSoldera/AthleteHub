@@ -90,7 +90,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 ### EPIC 5 — Nutrition · [epic-5-nutrition.md](epic-5-nutrition.md)
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
-| AH-050 | Schema: foods, diet_plans, diet_meals, meal_items, diary_entries, favorites | TODO | AH-010 |
+| AH-050 | Schema: foods, diet_plans, diet_meals, meal_items, diary_entries, favorites | DONE | AH-010 |
 | AH-051 | Food DB search + seed + custom foods | TODO | AH-050 |
 | AH-052 | Active diet plan + day endpoint (totals/remaining) | TODO | AH-050 |
 | AH-053 | Diary entries (add food to a day) | TODO | AH-051, AH-052 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 28 done / 47. **Epics 1–4 all fully closed. Epic 5 (Nutrition) is next.**
+**Progress:** 29 done / 47. **Epics 1–4 fully closed; Epic 5 (Nutrition) opened with AH-050 schema.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -961,7 +961,79 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
       * **Free-form `point_id` honored end-to-end** — picker
         offers common points but the custom-field always wins
         when filled, matching the schema design.
-  - **Next:** **AH-050 — Nutrition schema**:
-    `foods, diet_plans, diet_meals, meal_items, diary_entries,
-    favorites`. Same simplifications pattern as AH-030/040 (skip
-    offline reconciliation, defer coach-assignment FKs).
+  - **AH-050 DONE** — Nutrition foundation. Flyway
+    `V20260529150000__create_nutrition_tables.sql` creates the 6
+    tables per `02-data-model.md §4.6` with the MVP simplifications
+    spelled out in the migration header: no `client_uuid` (online-
+    first), no `assigned_by_coach_id` FK on diet_plans yet (Epic 7's
+    `assignments` table hasn't landed — the
+    `diary_entries.source = 'coach'` enum value is already accepted
+    so the data shape stays forward-compatible), no `tsvector`
+    full-text search (LOWER(name) index is enough for AH-051's
+    substring search, same call as exercises).
+    Tables
+      * **`foods`** — catalog. `is_global = TRUE` rows are the seed
+        list (`created_by IS NULL`); user customs belong to one
+        user (`created_by NOT NULL`). XOR rule mirrors exercises
+        (AH-030). Macros are `NUMERIC(7,2)`; `serving_size_g > 0`;
+        all macros ≥ 0; optional `fiber_g`, `sodium_mg`.
+      * **`diet_plans`** — reusable plans owned by a user.
+        `is_library = TRUE` flags coach library entries.
+      * **`diet_meals`** — named meal inside a plan ("Breakfast",
+        "Post-workout"). `time_hint` is free-form HH:MM TEXT; the
+        UI uses it to sort the day's meals but the server doesn't
+        parse it.
+      * **`meal_items`** — one food entry inside a meal with target
+        amount + unit + position. `unit ∈ {g, ml, portion}`.
+      * **`diary_entries`** — what the user actually ate, when.
+        `meal_label` is free-form so users can bucket entries
+        however they like ("Pre-workout", "Cheat meal") without
+        being forced into a fixed enum. `source ∈ {self, plan,
+        favorite, coach}`.
+      * **`favorites`** — per-user food bookmarks for quick-add.
+        UNIQUE(user_id, food_id) — favouriting twice is a no-op
+        at the data layer.
+    Sharp edges encoded:
+      * `UNIQUE(plan_id, position)` on diet_meals;
+        `UNIQUE(meal_id, position)` on meal_items so reordering
+        is an UPDATE not an append.
+      * `UNIQUE(user_id, food_id)` on favorites.
+    Cascade choices:
+      * **delete plan** → meals → items (CASCADE chain).
+      * **delete user** → CASCADE to diet_plans (then meals + items
+        in the chain), diary_entries, favorites, and their custom
+        foods (`foods.created_by → CASCADE`).
+      * **delete food** → RESTRICTed when referenced by meal_items
+        or diary_entries (catalog can't drop out from under
+        history); but CASCADE on favorites (a favorite is just a
+        bookmark — losing the food makes the bookmark meaningless).
+        The user-delete chain still works because the meal_items
+        and diary_entries are gone before `foods.created_by`
+        CASCADE fires.
+    Indexes documented in the spec are all present:
+    `idx_foods_name_lower` for case-insensitive search;
+    `idx_foods_created_by` partial for "my customs";
+    `idx_diet_plans_owner (owner_id, id DESC)`;
+    `idx_diet_meals_plan (plan_id, position)`;
+    `idx_meal_items_meal (meal_id, position)`;
+    `idx_diary_entries_user_eaten (user_id, eaten_at DESC)` —
+    "today's diary" + "week summary" both scan that way;
+    `idx_favorites_user (user_id, id DESC)`.
+    `NutritionSchemaIT` 13/13 (150 ms): tables + indexes present,
+    foods XOR enforced (both legal shapes succeed), macros must be
+    non-negative, serving size must be positive, meal_items unit
+    rejects unknown ('oz') and accepts 'g', diary_entries source
+    rejects unknown ('import') and accepts 'coach' (forward-
+    compatible), diet_meals position unique per plan + meal_items
+    position unique per meal + favorites unique per (user, food),
+    plan → meals → items cascade, food deletion RESTRICTed by
+    meal_items + diary_entries (two separate cases), favorites
+    CASCADE on food deletion, user deletion cascades to plans +
+    diary + favorites.
+    Full backend suite: **180/180** (20 ITs + 3 unit).
+  - **Next:** **AH-051 — food DB search + seed + custom foods**:
+    `GET /api/foods?q=` (global + user-custom; same visibility
+    rule as exercises), `POST /api/foods` for custom rows, plus a
+    seed migration with the starter catalog (chicken breast, white
+    rice, oats, banana, etc. — basic macros per 100 g). Mirrors
+    AH-031's shape exactly.
