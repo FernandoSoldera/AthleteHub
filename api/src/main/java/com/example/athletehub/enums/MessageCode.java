@@ -55,5 +55,9 @@ public enum MessageCode {
     FOOD_ALREADY_EXISTS,
 
     // Nutrition (EPIC 5 — AH-052)
-    DIET_PLAN_NOT_FOUND
+    DIET_PLAN_NOT_FOUND,
+
+    // Nutrition (EPIC 5 — AH-053)
+    FOOD_NOT_FOUND,
+    DIARY_ENTRY_NOT_FOUND
 }

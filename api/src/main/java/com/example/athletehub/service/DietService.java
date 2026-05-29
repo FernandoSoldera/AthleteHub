@@ -1,9 +1,13 @@
 package com.example.athletehub.service;
 
+import com.example.athletehub.dto.AddFavoriteRequest;
+import com.example.athletehub.dto.CreateDiaryEntryRequest;
+import com.example.athletehub.dto.CursorPage;
 import com.example.athletehub.dto.DayResponse;
 import com.example.athletehub.dto.DiaryEntryDto;
 import com.example.athletehub.dto.DietMealDto;
 import com.example.athletehub.dto.DietPlanDto;
+import com.example.athletehub.dto.FavoriteDto;
 import com.example.athletehub.dto.FoodDto;
 import com.example.athletehub.dto.Macros;
 import com.example.athletehub.dto.MealItemDto;
@@ -13,16 +17,19 @@ import com.example.athletehub.exception.ResourceNotFoundException;
 import com.example.athletehub.model.DiaryEntry;
 import com.example.athletehub.model.DietMeal;
 import com.example.athletehub.model.DietPlan;
+import com.example.athletehub.model.Favorite;
 import com.example.athletehub.model.Food;
 import com.example.athletehub.model.MealItem;
 import com.example.athletehub.model.User;
 import com.example.athletehub.repository.DiaryEntryRepository;
 import com.example.athletehub.repository.DietMealRepository;
 import com.example.athletehub.repository.DietPlanRepository;
+import com.example.athletehub.repository.FavoriteRepository;
 import com.example.athletehub.repository.FoodRepository;
 import com.example.athletehub.repository.MealItemRepository;
 import com.example.athletehub.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -75,6 +82,7 @@ public class DietService {
     private final DietMealRepository mealRepository;
     private final MealItemRepository itemRepository;
     private final DiaryEntryRepository diaryRepository;
+    private final FavoriteRepository favoriteRepository;
     private final FoodRepository foodRepository;
     private final UserRepository userRepository;
     private final Clock clock;
@@ -158,7 +166,109 @@ public class DietService {
         return new DayResponse(day, entryDtos, round(totals), round(target), round(remaining));
     }
 
+    // ── AH-053 — diary entries (POST / DELETE) ────────────────────────────
+
+    @Transactional
+    public DiaryEntryDto addDiaryEntry(Long userId, CreateDiaryEntryRequest request) {
+        Food food = foodRepository.findByIdAndVisibleTo(request.getFoodId(), userId)
+                .orElseThrow(() -> new ResourceNotFoundException(MessageCode.FOOD_NOT_FOUND));
+
+        DiaryEntry saved = diaryRepository.save(DiaryEntry.builder()
+                .userId(userId)
+                .foodId(food.getId())
+                .amount(request.getAmount())
+                .unit(request.getUnit())
+                .mealLabel(trimToNull(request.getMealLabel()))
+                .eatenAt(request.getEatenAt())  // null → @PrePersist defaults to now()
+                .source(request.getSource() == null ? "self" : request.getSource())
+                .build());
+
+        Macros scaled = round(scaleMacros(saved.getAmount(), saved.getUnit(), food));
+        return new DiaryEntryDto(
+                saved.getId(),
+                saved.getFoodId(),
+                food.getName(),
+                saved.getEatenAt(),
+                saved.getAmount(),
+                saved.getUnit(),
+                saved.getMealLabel(),
+                saved.getSource(),
+                scaled);
+    }
+
+    @Transactional
+    public void deleteDiaryEntry(Long userId, Long entryId) {
+        DiaryEntry entry = diaryRepository.findById(entryId)
+                .filter(e -> e.getUserId().equals(userId))
+                .orElseThrow(() -> new ResourceNotFoundException(MessageCode.DIARY_ENTRY_NOT_FOUND));
+        diaryRepository.delete(entry);
+    }
+
+    // ── AH-053 — favorites (GET / POST / DELETE) ──────────────────────────
+
+    @Transactional(readOnly = true)
+    public CursorPage<FavoriteDto> listFavorites(Long userId, Long cursor, int limit) {
+        List<Favorite> rows = favoriteRepository.findRecent(
+                userId, cursor, PageRequest.of(0, limit + 1));
+        boolean hasMore = rows.size() > limit;
+        List<Favorite> visible = hasMore ? rows.subList(0, limit) : rows;
+
+        // Batch-hydrate every food.
+        Set<Long> foodIds = new HashSet<>();
+        for (Favorite f : visible) foodIds.add(f.getFoodId());
+        Map<Long, Food> foodsById = foodsByIdMap(foodIds);
+
+        List<FavoriteDto> items = new ArrayList<>(visible.size());
+        for (Favorite f : visible) {
+            Food food = foodsById.get(f.getFoodId());
+            // RESTRICT on favorites.food_id is CASCADE, so if a food vanished
+            // the favorite is gone too — but if hydration misses for any
+            // reason, we still emit the favorite with food = null rather
+            // than skip it.
+            items.add(new FavoriteDto(
+                    f.getId(),
+                    f.getCreatedAt(),
+                    food == null ? null : FoodDto.from(food)));
+        }
+        String nextCursor = hasMore
+                ? String.valueOf(visible.get(visible.size() - 1).getId())
+                : null;
+        return CursorPage.of(items, nextCursor);
+    }
+
+    /**
+     * Find-or-insert. If the user already favourites this food, return the
+     * existing row — the API is idempotent. Validates food visibility so
+     * you can't favourite another user's custom (returns 404 FOOD_NOT_FOUND).
+     */
+    @Transactional
+    public FavoriteDto addFavorite(Long userId, AddFavoriteRequest request) {
+        Food food = foodRepository.findByIdAndVisibleTo(request.getFoodId(), userId)
+                .orElseThrow(() -> new ResourceNotFoundException(MessageCode.FOOD_NOT_FOUND));
+
+        Favorite favorite = favoriteRepository
+                .findByUserIdAndFoodId(userId, food.getId())
+                .orElseGet(() -> favoriteRepository.save(Favorite.builder()
+                        .userId(userId)
+                        .foodId(food.getId())
+                        .build()));
+
+        return new FavoriteDto(favorite.getId(), favorite.getCreatedAt(), FoodDto.from(food));
+    }
+
+    @Transactional
+    public void removeFavorite(Long userId, Long foodId) {
+        // Idempotent: deleting a missing favorite is a no-op (no 404).
+        favoriteRepository.deleteByUserIdAndFoodId(userId, foodId);
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────
+
+    private static String trimToNull(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
+    }
 
     private Long activePlanId(Long userId) {
         return userRepository.findById(userId)

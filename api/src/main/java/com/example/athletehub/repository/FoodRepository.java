@@ -58,4 +58,18 @@ public interface FoodRepository extends JpaRepository<Food, Long> {
      * variant ("Chicken Breast (raw, my batch)").
      */
     Optional<Food> findFirstByCreatedByAndNameIgnoreCase(Long createdBy, String name);
+
+    /**
+     * Same visibility rule as the search ({@code is_global = true OR
+     * created_by = userId}). Used by the diary / favorites endpoints to
+     * reject references to foods the caller can't see — returns empty
+     * instead of leaking another user's customs.
+     */
+    @Query("""
+            SELECT f FROM Food f
+            WHERE f.id = :foodId
+              AND (f.global = true OR f.createdBy = :userId)
+            """)
+    Optional<Food> findByIdAndVisibleTo(@Param("foodId") Long foodId,
+                                        @Param("userId") Long userId);
 }

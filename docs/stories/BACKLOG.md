@@ -93,7 +93,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-050 | Schema: foods, diet_plans, diet_meals, meal_items, diary_entries, favorites | DONE | AH-010 |
 | AH-051 | Food DB search + seed + custom foods | DONE | AH-050 |
 | AH-052 | Active diet plan + day endpoint (totals/remaining) | DONE | AH-050 |
-| AH-053 | Diary entries (add food to a day) | TODO | AH-051, AH-052 |
+| AH-053 | Diary entries (add food to a day) | DONE | AH-051, AH-052 |
 | AH-054 | Client: Diet screen (macro ring, day strip), Add food sheet + service | TODO | AH-052, AH-017 |
 
 ### EPIC 6 — Feed · [epic-6-feed.md](epic-6-feed.md)
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 31 done / 47. **Epics 1–4 fully closed; Epic 5 (Nutrition) 3/5 — schema + food catalog + active plan / day endpoint.**
+**Progress:** 32 done / 47. **Epics 1–4 fully closed; Epic 5 backend done (4/5) — only AH-054 (Flutter client) remains to close the epic.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1157,8 +1157,78 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
         no leakage between users; no token → 401; bad date format
         → 400 VALIDATION_FAILED (via new handler).
     Full backend suite: **208/208** (22 ITs + 3 unit).
-  - **Next:** **AH-053 — diary entries**: `POST /api/diet/diary`
-    (add food to a day; body `{foodId, amount, unit, mealLabel?,
-    eatenAt?, source?}`), `DELETE /api/diet/diary/{id}` (remove an
-    entry), `GET /api/diet/favorites` + `POST/DELETE` for
-    quick-add. Closes the backend half of Epic 5.
+  - **AH-053 DONE** — diary CRUD + favorites. **Closes the backend
+    half of Epic 5.** Five new endpoints, all on the existing
+    `DietController`:
+      * **`POST /api/diet/diary`** — `{foodId, amount, unit,
+        mealLabel?, eatenAt?, source?}`. Validates food visibility
+        (global or owned by caller) via the new
+        `FoodRepository.findByIdAndVisibleTo` — referencing another
+        user's custom returns 404 `FOOD_NOT_FOUND` (no
+        existence-vs-permission timing side channel). `unit ∈
+        {g, ml, portion}`, `amount > 0`, `source ∈
+        {self, plan, favorite}` — `coach` is rejected from the
+        client API (reserved for Epic 7's assignment path).
+        `eatenAt` defaults server-side to now() when null; the
+        response echoes the same `DiaryEntryDto` shape the day
+        endpoint uses, with macros already scaled.
+      * **`DELETE /api/diet/diary/{id:\\d+}`** — 204. Validates
+        owner; 404 `DIARY_ENTRY_NOT_FOUND` on someone else's row.
+      * **`GET /api/diet/favorites?cursor=&limit=`** — newest-first
+        cursor pagination on id DESC. Each item carries the
+        hydrated `FoodDto` so the Quick-Add list renders macros
+        without a follow-up call.
+      * **`POST /api/diet/favorites`** — `{foodId}`. Find-or-insert:
+        favoriting the same food twice returns the existing row
+        (idempotent contract; doesn't surface the schema's
+        `UNIQUE(user_id, food_id)` as a 409). Validates food
+        visibility same as diary.
+      * **`DELETE /api/diet/favorites/{foodId:\\d+}`** — 204.
+        Deletes by natural key, idempotent — second call is still
+        204 (the API contract is "favourite is gone", not "I
+        removed a row").
+    **Sharp edge encoded** — `FoodRepository.findByIdAndVisibleTo`
+    is the single chokepoint for "is the caller allowed to
+    reference this food?" Both the diary and favorites paths use
+    it so visibility logic doesn't fork.
+    Files added
+      * `model/Favorite`
+      * `repository/FavoriteRepository`
+      * `dto/{CreateDiaryEntryRequest, AddFavoriteRequest, FavoriteDto}`
+      * `enums/MessageCode` + `FOOD_NOT_FOUND`,
+        `DIARY_ENTRY_NOT_FOUND`
+      * test: `DiaryAndFavoritesIT` (21 cases)
+    Files modified
+      * `repository/FoodRepository` + `findByIdAndVisibleTo`
+      * `service/DietService` + `addDiaryEntry`, `deleteDiaryEntry`,
+        `listFavorites`, `addFavorite`, `removeFavorite`,
+        `trimToNull` helper, `FavoriteRepository` dep
+      * `controller/DietController` — 5 new endpoints + clampLimit
+    `DiaryAndFavoritesIT` 21/21 (6 s):
+      * **Diary create** — happy path returns 201 with scaled
+        macros (200g chicken → 330 kcal, 62 g protein), defaults
+        source=self + eatenAt=now, accepts plan + favorite
+        sources, rejects coach source from client (400), rejects
+        unknown food / another user's custom (404
+        FOOD_NOT_FOUND), rejects bad unit / zero amount (400),
+        no token → 401.
+      * **Diary delete** — 204 + row gone, another user's entry →
+        404 DIARY_ENTRY_NOT_FOUND, unknown → 404.
+      * **Favorites** — list empty by default, add returns 201
+        with hydrated food, add is idempotent (same row id on
+        dup; single DB row), add rejects another user's custom →
+        404, list newest-first per user with no leakage, delete
+        by foodId is 204 and idempotent (second call still 204),
+        delete only touches caller's row (two users favoriting
+        the same food don't affect each other), food deletion
+        cascades to favorites (schema CASCADE), all favorite
+        endpoints → 401 without token.
+    Full backend suite: **229/229** (23 ITs + 3 unit).
+  - **Next:** **AH-054 — Flutter client: Diet screen + Add food
+    sheet + service.** Closes Epic 5. Models mirror the backend
+    DTOs (`DietPlan`, `DietMeal`, `MealItem`, `DiaryEntry`,
+    `Favorite`, `Macros`, `DayResponse`); service with the 8
+    nutrition endpoints; screens for Diet (day strip with macro
+    ring + meal cards), Add Food sheet (food search +
+    amount/unit + meal label), Favorites quick-add. The Diet tab
+    in main_shell finally gets a real screen.
