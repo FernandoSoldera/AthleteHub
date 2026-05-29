@@ -91,7 +91,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
 | AH-050 | Schema: foods, diet_plans, diet_meals, meal_items, diary_entries, favorites | DONE | AH-010 |
-| AH-051 | Food DB search + seed + custom foods | TODO | AH-050 |
+| AH-051 | Food DB search + seed + custom foods | DONE | AH-050 |
 | AH-052 | Active diet plan + day endpoint (totals/remaining) | TODO | AH-050 |
 | AH-053 | Diary entries (add food to a day) | TODO | AH-051, AH-052 |
 | AH-054 | Client: Diet screen (macro ring, day strip), Add food sheet + service | TODO | AH-052, AH-017 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 29 done / 47. **Epics 1–4 fully closed; Epic 5 (Nutrition) opened with AH-050 schema.**
+**Progress:** 30 done / 47. **Epics 1–4 fully closed; Epic 5 (Nutrition) 2/5 — schema + food catalog with seed + customs.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1031,9 +1031,53 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     CASCADE on food deletion, user deletion cascades to plans +
     diary + favorites.
     Full backend suite: **180/180** (20 ITs + 3 unit).
-  - **Next:** **AH-051 — food DB search + seed + custom foods**:
-    `GET /api/foods?q=` (global + user-custom; same visibility
-    rule as exercises), `POST /api/foods` for custom rows, plus a
-    seed migration with the starter catalog (chicken breast, white
-    rice, oats, banana, etc. — basic macros per 100 g). Mirrors
-    AH-031's shape exactly.
+  - **AH-051 DONE** — food DB. Mirrors AH-031 (exercise catalog)
+    almost exactly. Seed migration
+    `V20260529160000__seed_global_foods.sql` loads ~27 staples
+    (proteins, dairy, grains, fruit, vegetables, fats) with macros
+    per 100 g taken from USDA averages, rounded to 1 decimal.
+    `brand` stays NULL — these are generic foods; brand-name
+    products belong in user customs.
+    Two endpoints
+      * **`GET /api/foods?q=&cursor=&limit=`** — visibility-
+        filtered search: global rows + caller's own customs.
+        Case-insensitive substring on name. Cursor on id ASC
+        (globals seeded first → low ids → catalog first then
+        user's additions). Empty-after-trim `q` treated as no
+        filter.
+      * **`POST /api/foods`** — create a custom (`is_global = false`,
+        `created_by = caller`). Bean validation mirrors the schema
+        CHECKs (`servingSizeG > 0`, macros ≥ 0, name non-blank).
+        Reject duplicate names against the caller's own customs
+        (409 `FOOD_ALREADY_EXISTS`) — globals are intentionally
+        forkable so a user can record their own batch.
+    **Same null-q query-split trick** as the exercise catalog: two
+    JPQL methods (`searchVisible` and `searchVisibleByName`)
+    because passing null into `CONCAT('%', :q, '%')` trips
+    PostgreSQL's type inference into `lower(bytea)` (doesn't exist).
+    Files: `model/Food`, `repository/FoodRepository`,
+    `dto/{FoodDto, CreateFoodRequest}`, `service/FoodService`,
+    `controller/FoodController`, +`FOOD_ALREADY_EXISTS` MessageCode.
+    `FoodCatalogIT` 12/12 (3.5 s): seed loaded (≥ 25 globals),
+    search without token → 401, case-insensitive substring,
+    blank/whitespace query returns full catalog, cursor pagination
+    walks pages without overlap, create marks custom + only owner
+    sees it, duplicate name from same user → 409, same name OK
+    across users, naming a custom after a global is allowed,
+    validation rejects negative macros / zero serving size /
+    blank name.
+    **Sharp edge** caught the first time around: my IT helper
+    URL-encoded the `q` parameter with literal `%20` substitution.
+    Spring didn't decode them as expected and the search ran with
+    `q = "%20%20%20"`. Switched to `RestTemplate`'s URI template
+    variable substitution (`{q}` placeholder + vars map), same as
+    `CardioActivityIT`/`EvaluationListAndSeriesIT`. That's the
+    pattern to use for any future query-string IT helper.
+    Full backend suite: **192/192** (21 ITs + 3 unit).
+  - **Next:** **AH-052 — active diet plan + day endpoint**:
+    introduce `users.active_diet_plan_id` (FK) so a user can flag
+    one plan as their current; `GET /api/diet/active` returns it
+    hydrated; `GET /api/diet/day?date=...` aggregates the day's
+    diary entries with macro totals + remaining vs the plan's
+    target (sum across meal items × amount), so the Diet screen
+    can render the macro ring without client-side math.

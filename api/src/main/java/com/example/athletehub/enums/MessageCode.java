@@ -49,5 +49,8 @@ public enum MessageCode {
 
     // Body / Evolution (EPIC 4 — AH-042)
     INVALID_METRIC,
-    INVALID_RANGE
+    INVALID_RANGE,
+
+    // Nutrition (EPIC 5 — AH-051)
+    FOOD_ALREADY_EXISTS
 }
