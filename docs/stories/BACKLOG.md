@@ -94,7 +94,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-051 | Food DB search + seed + custom foods | DONE | AH-050 |
 | AH-052 | Active diet plan + day endpoint (totals/remaining) | DONE | AH-050 |
 | AH-053 | Diary entries (add food to a day) | DONE | AH-051, AH-052 |
-| AH-054 | Client: Diet screen (macro ring, day strip), Add food sheet + service | TODO | AH-052, AH-017 |
+| AH-054 | Client: Diet screen (macro ring, day strip), Add food sheet + service | DONE | AH-052, AH-017 |
 
 ### EPIC 6 — Feed · [epic-6-feed.md](epic-6-feed.md)
 | ID | Story | Status | Depends on |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 32 done / 47. **Epics 1–4 fully closed; Epic 5 backend done (4/5) — only AH-054 (Flutter client) remains to close the epic.**
+**Progress:** 33 done / 47. **Epics 1–5 all fully closed. Epic 6 (Feed) is next.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1224,11 +1224,87 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
         cascades to favorites (schema CASCADE), all favorite
         endpoints → 401 without token.
     Full backend suite: **229/229** (23 ITs + 3 unit).
-  - **Next:** **AH-054 — Flutter client: Diet screen + Add food
-    sheet + service.** Closes Epic 5. Models mirror the backend
-    DTOs (`DietPlan`, `DietMeal`, `MealItem`, `DiaryEntry`,
-    `Favorite`, `Macros`, `DayResponse`); service with the 8
-    nutrition endpoints; screens for Diet (day strip with macro
-    ring + meal cards), Add Food sheet (food search +
-    amount/unit + meal label), Favorites quick-add. The Diet tab
-    in main_shell finally gets a real screen.
+  - **AH-054 DONE** — Flutter Diet screen + Add-Food sheet.
+    **Closes Epic 5.** Eight models mirror the backend DTOs; one
+    service; one custom-painted widget; two screens; main_shell
+    wired.
+    Files added
+      * `models/responses/{macros, food, meal_item, diet_meal,
+        diet_plan, diary_entry, favorite, day_response}.dart` —
+        manual `fromJson` per CONVENTIONS.
+      * `services/api/diet_api_service.dart` — `day(date?)`,
+        `getActivePlan()` (handles empty body → null), `addDiaryEntry`,
+        `deleteDiaryEntry`, `listFavorites`, `addFavorite`,
+        `removeFavorite`, `searchFoods`. All routed through
+        `HttpInterceptor` so 401 → silent refresh + retry.
+      * `widgets/macro_ring.dart` — custom-painted three-concentric-
+        arc ring (protein / carb / fat). Each arc fills
+        `consumed / target` clamped to [0, 1]; when target is null
+        the ring shows the colours at full sweep and the legend
+        below reads raw grams. Kcal big in the centre, "of X kcal"
+        subtitle when target is set.
+      * `screens/add_food_sheet.dart` — modal bottom-sheet with two
+        tabs (Search / Favorites). Search is 250 ms-debounced
+        across the global + custom catalog; Favorites lists the
+        caller's quick-add bookmarks. Per-row star toggles the
+        favorite (idempotent backend, no need to track local
+        state). Tapping a food reveals an amount/unit form with:
+        - amount pre-filled to `food.servingSizeG` so 1-tap logs
+          a 100 g default,
+        - a live "Adds: N kcal · P/C/F" preview that mirrors the
+          backend's macro scaling rule (`g`/`ml` divide by serving
+          size, `portion` multiplies directly),
+        - a "Save as favorite for Quick-Add" checkbox so the user
+          can favourite + log in one tap (best-effort favorite —
+          a partial failure doesn't surface as primary error),
+        - optional meal-label field (pre-filled when launched from
+          a meal section's "Add" button).
+      * `screens/diet_screen.dart` — Diet tab.
+        - Day navigator with prev / next arrows and tappable date
+          (opens a date picker, range [2020, now + 1y]).
+        - `MacroRing` centered, with a legend row beneath showing
+          consumed and target grams per macro.
+        - Empty-state banner under the ring: "No active diet plan
+          — showing raw totals. Plan support arrives with coaching."
+          (Per Option A — plan creation deferred to Epic 7 /
+          AH-054b.)
+        - Diary entries grouped by `mealLabel` (defaulting to
+          "Other" when null), preserving insertion order for
+          stable rendering. Each meal section has its own "Add"
+          button that pre-fills the meal label.
+        - Swipe-to-delete on entries with a confirm dialog (avoids
+          accidental loss of a 15-meal-day-of-tracking entry).
+        - FAB → AddFoodSheet without a default meal label.
+        - Pull-to-refresh re-fetches the day payload.
+    Files modified
+      * `main_shell.dart` — Diet tab now hosts `DietScreen`
+        (replaces the placeholder).
+    Verification
+      * `flutter analyze` clean.
+      * `flutter test` 2/2 green.
+      * No backend changes — 229/229 still green.
+    Design choices captured
+      * **Macro ring degrades cleanly when target is null.** No
+        plan → full-sweep coloured arcs + legend reads "Xg" not
+        "X / Y g"; the design doesn't need a separate "no plan"
+        widget.
+      * **Amount pre-fill to serving size** makes 1-tap logging
+        the common case. Easy override (the field is editable
+        immediately), but a chicken-breast-100g-default is the
+        most-likely amount.
+      * **Live macro preview in the amount form** mirrors the
+        backend's exact scaling rule so the user sees the same
+        numbers they'll get after submit. Less likely to feel
+        like the backend "lied" on rollups.
+      * **Best-effort favorite on submit** — if the user checks
+        "save as favorite" and the favorite POST fails, the
+        diary entry still landed and we don't surface a partial
+        error. The next AddFoodSheet open will refresh favorites
+        anyway.
+      * **Meal-label sections pre-fill the Add button** so the
+        common "Breakfast → add eggs → add toast" flow is two
+        taps less.
+  - **Next:** **Epic 6 (Feed)** opens with **AH-060**:
+    schema for `posts`, `post_likes`, `post_comments`. Same
+    pattern as the other epic openers — Flyway migration with
+    the MVP simplifications, schema-only IT.
