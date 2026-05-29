@@ -71,7 +71,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 ### EPIC 3 — Training · [epic-3-training.md](epic-3-training.md)
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
-| AH-030 | Schema: exercises, templates, sessions, session_exercises, sets, cardio, PRs | TODO | AH-010 |
+| AH-030 | Schema: exercises, templates, sessions, session_exercises, sets, cardio, PRs | DONE | AH-010 |
 | AH-031 | Exercise catalog endpoints + seed | TODO | AH-030 |
 | AH-032 | Today's plan + start session | TODO | AH-031 |
 | AH-033 | Log/complete sets + finish session (volume, PR detection) | TODO | AH-032 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 17 done / 47. **Epic 1 + Epic 2 fully closed. Epic 3 (Training) is next.**
+**Progress:** 18 done / 47. **Epic 1 + Epic 2 fully closed; Epic 3 (Training) started with AH-030 schema.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -366,7 +366,37 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     `flutter analyze` clean (no issues); `flutter test` 2/2 green.
     **Closes Epic 2 (5/5 stories).** Sessions counter on profile renders
     a placeholder `—` until AH-036 surfaces it.
-  - **Next:** **Epic 3 (Training)** opens with **AH-030 — schema:
-    exercises, templates, sessions, session_exercises, sets, cardio,
-    PRs** (Flyway migration). After that, AH-031 seeds the exercise
-    catalog, then AH-032/033 plan + log sessions.
+  - **AH-030 DONE** — Flyway `V20260528150000__create_training_tables.sql`
+    creates the 8 training tables per `02-data-model.md §4.4` with the
+    MVP simplifications spelled out: no `client_uuid` (online-first),
+    no `cardio_samples` hypertable (LATER), no PostGIS `route`
+    geography (LATER), and no `assignment_id` FK yet (the `assignments`
+    table arrives in Epic 7 — the `source = 'assigned'` enum value is
+    already accepted so the data shape stays forward-compatible).
+    Sharp edges encoded as CHECKs: exercises XOR rule (a row is either
+    global with `created_by IS NULL` or owned with `created_by NOT
+    NULL`); workout_sessions status ∈ {in_progress, completed,
+    abandoned}; personal_records UNIQUE(user_id, exercise_id, metric)
+    so "current PR" is a single row; cardio_activities type ∈ {run,
+    walk, cycle} and source ∈ {self, assigned, import}; rpe ∈ [0..10];
+    HR ∈ (0..300); set_number ≥ 1; positions ≥ 0. Cascade choices:
+    deleting a workout_session cleans its session_exercises + sets;
+    deleting a workout_template nulls workout_sessions.template_id
+    (sessions outlive their plan); deleting an exercise is RESTRICTed
+    when a session uses it (catalog can't drop out from under history).
+    Indexes documented in the spec are all present:
+    `idx_workout_sessions_user_started`, `idx_cardio_activities_user_started`,
+    plus a partial `idx_workout_sessions_user_active` for "what's
+    running right now?" lookups, `idx_exercises_name_lower` for case-
+    insensitive search, and per-template/per-session position indexes.
+    `TrainingSchemaIT` 9/9 (135 ms): table presence, index presence,
+    XOR constraint enforced, status / type / source enums reject bad
+    values, PR uniqueness, session→exercises/sets cascade, exercise
+    delete RESTRICT, template delete SET NULL. Full backend suite still
+    green: **62/62** (10 ITs + 3 unit). `assignment_id` and the FK
+    constraint will land alongside the assignments table in Epic 7.
+  - **Next:** **AH-031 — exercise catalog**: `GET /api/v1/exercises?q=`
+    (global + user-custom), `POST /api/v1/exercises` for custom rows,
+    plus a seed migration with the starter list (bench, squat, etc.).
+    JPA entities + repos + service + controller + IT covering search,
+    self-create, and the global/custom visibility split.
