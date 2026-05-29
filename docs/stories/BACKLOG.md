@@ -75,7 +75,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-031 | Exercise catalog endpoints + seed | DONE | AH-030 |
 | AH-032 | Today's plan + start session | DONE | AH-031 |
 | AH-033 | Log/complete sets + finish session (volume, PR detection) | DONE | AH-032 |
-| AH-034 | Cardio logging (run/walk/cycle) | TODO | AH-030 |
+| AH-034 | Cardio logging (run/walk/cycle) | DONE | AH-030 |
 | AH-035 | Recent sessions + weekly cardio summary | TODO | AH-033, AH-034 |
 | AH-036 | Client: Train, live Workout (rest timer), Cardio screens + service | TODO | AH-033, AH-017 |
 
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 21 done / 47. **Epic 1 + Epic 2 fully closed; Epic 3 (Training) 4/7 — schema + catalog + today/start + log sets/finish (with PR detection).**
+**Progress:** 22 done / 47. **Epic 1 + Epic 2 fully closed; Epic 3 (Training) 5/7 — schema + catalog + today/start + log/finish + cardio logging.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -538,8 +538,39 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     on completed → 409, finish on another user's session → 404,
     finish without token → 401.
     Full backend suite: **99/99** (13 ITs + 3 unit).
-  - **Next:** **AH-034 — cardio logging**: `POST
-    /api/cardio-activities` (run/walk/cycle with distance,
-    duration, avg pace/HR/power, elevation, kcal, notes) and `GET
-    /api/cardio-activities?cursor=` (recent list, cursor on id
-    DESC).
+  - **AH-034 DONE** — cardio logging. JPA `CardioActivity` entity
+    over the existing AH-030 table; no schema changes. Two endpoints:
+      * `POST /api/cardio-activities` — body has required
+        `{type, distanceM, durationSeconds}` plus optional
+        `{avgPaceSPerKm, avgPowerW, avgHr, maxHr, elevationGainM,
+        kcal, notes, startedAt}`. Bean validation mirrors the schema
+        CHECKs: type ∈ {run, walk, cycle}, distance/duration ≥ 0,
+        HR ∈ [1..299], pace/power/elevation ≥ 0 when supplied. Bad
+        payloads → 400 `VALIDATION_FAILED` with field errors, not
+        500 `DataIntegrityViolation`. Source hardcoded to `self` —
+        `import` and `assigned` will route through dedicated
+        endpoints (wearable sync; Epic 7 assignments).
+        `startedAt` defaults to NOW() via `@PrePersist` when null so
+        the client only needs it for backfill.
+      * `GET /api/cardio-activities?cursor=&limit=` — newest-first
+        cursor pagination on id DESC (same `limit + 1` pattern).
+        Surrogate-id cursor (not started_at) so backfilled activities
+        land at the top of the list — matches the UX of "I just
+        logged my Sunday run on Tuesday".
+    Files: `model/CardioActivity`, `dto/{CardioActivityDto,
+    CreateCardioRequest}`, `repository/CardioActivityRepository`,
+    `service/CardioService`, `controller/CardioController`.
+    `CardioActivityIT` 11/11 (3 s): full payload roundtrip, minimal
+    payload (server defaults startedAt + source), reject unknown
+    type → 400, reject HR > 299 → 400, reject negative distance →
+    400, no token → 401; list empty when no activities, newest-first
+    ordering across three types, no leakage between users, cursor
+    walks pages, list without token → 401.
+    Full backend suite: **110/110** (14 ITs + 3 unit).
+  - **Next:** **AH-035 — recent sessions + weekly cardio summary**:
+    `GET /api/workout-sessions?cursor=` (recent workout sessions
+    with volume/duration/sets/PR count from the rollups AH-033
+    persists) and `GET /api/training/weekly-summary` (this week's
+    cardio km + delta vs last week, for the Train chart). Closes
+    the backend half of Epic 3 — only AH-036 (Flutter client)
+    remains.
