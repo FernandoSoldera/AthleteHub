@@ -6,6 +6,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 public interface CardioActivityRepository extends JpaRepository<CardioActivity, Long> {
@@ -30,4 +32,20 @@ public interface CardioActivityRepository extends JpaRepository<CardioActivity, 
     List<CardioActivity> findRecent(@Param("userId") Long userId,
                                     @Param("beforeId") Long beforeId,
                                     Pageable pageable);
+
+    /**
+     * Sum of {@code distance_m} for {@code userId} in the half-open window
+     * {@code [start, end)}. Used by the weekly summary. Returns 0 when the
+     * user has no activities in the range (COALESCE keeps the caller from
+     * doing a null check).
+     */
+    @Query("""
+            SELECT COALESCE(SUM(c.distanceM), 0) FROM CardioActivity c
+            WHERE c.userId = :userId
+              AND c.startedAt >= :start
+              AND c.startedAt <  :end
+            """)
+    BigDecimal sumDistanceBetween(@Param("userId") Long userId,
+                                  @Param("start") OffsetDateTime start,
+                                  @Param("end") OffsetDateTime end);
 }

@@ -1,5 +1,6 @@
 package com.example.athletehub.service;
 
+import com.example.athletehub.dto.CursorPage;
 import com.example.athletehub.dto.ExerciseSetDto;
 import com.example.athletehub.dto.PatchSessionRequest;
 import com.example.athletehub.dto.SessionExerciseDto;
@@ -7,7 +8,9 @@ import com.example.athletehub.dto.SetOpRequest;
 import com.example.athletehub.dto.StartSessionRequest;
 import com.example.athletehub.dto.TemplateExerciseDto;
 import com.example.athletehub.dto.TodayPlanResponse;
+import com.example.athletehub.dto.WeeklySummaryDto;
 import com.example.athletehub.dto.WorkoutSessionDto;
+import com.example.athletehub.dto.WorkoutSessionSummaryDto;
 import com.example.athletehub.dto.WorkoutTemplateDto;
 import com.example.athletehub.enums.MessageCode;
 import com.example.athletehub.exception.BadRequestException;
@@ -20,6 +23,7 @@ import com.example.athletehub.model.SessionExercise;
 import com.example.athletehub.model.WorkoutSession;
 import com.example.athletehub.model.WorkoutTemplate;
 import com.example.athletehub.model.WorkoutTemplateExercise;
+import com.example.athletehub.repository.CardioActivityRepository;
 import com.example.athletehub.repository.ExerciseRepository;
 import com.example.athletehub.repository.ExerciseSetRepository;
 import com.example.athletehub.repository.PersonalRecordRepository;
@@ -36,9 +40,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -78,6 +85,7 @@ public class TrainingService {
     private final ExerciseSetRepository exerciseSetRepository;
     private final PersonalRecordRepository personalRecordRepository;
     private final ExerciseRepository exerciseRepository;
+    private final CardioActivityRepository cardioRepository;
     private final UserCountersRepository userCountersRepository;
     private final Clock clock;
 
@@ -99,6 +107,63 @@ public class TrainingService {
                 .orElse(null);
 
         return new TodayPlanResponse(templateDto, activeSessionId);
+    }
+
+    // ── AH-035 — recent sessions + weekly cardio summary ──────────────────
+
+    /**
+     * Recent workout sessions for the caller, newest-first (id DESC). Both
+     * in-progress and completed surface — the client filters if it only
+     * wants completed. Returns the slim summary DTO so a 20-row page stays
+     * a single SELECT plus a few rollup fields.
+     */
+    @Transactional(readOnly = true)
+    public CursorPage<WorkoutSessionSummaryDto> listRecentSessions(Long userId, Long cursor, int limit) {
+        List<WorkoutSession> rows = sessionRepository.findRecent(
+                userId, cursor, PageRequest.of(0, limit + 1));
+        boolean hasMore = rows.size() > limit;
+        List<WorkoutSession> visible = hasMore ? rows.subList(0, limit) : rows;
+        List<WorkoutSessionSummaryDto> items = visible.stream()
+                .map(WorkoutSessionSummaryDto::from)
+                .toList();
+        String nextCursor = hasMore
+                ? String.valueOf(visible.get(visible.size() - 1).getId())
+                : null;
+        return CursorPage.of(items, nextCursor);
+    }
+
+    /**
+     * Weekly cardio summary for the Train chart: total km this ISO week
+     * (Mon 00:00 … next Mon 00:00, server zone) vs last week, plus delta.
+     *
+     * <p>The week boundary is computed via {@link TemporalAdjusters#previousOrSame(DayOfWeek)}
+     * so "today is Monday" still resolves to the current week's start (not
+     * the previous one).
+     */
+    @Transactional(readOnly = true)
+    public WeeklySummaryDto getWeeklySummary(Long userId) {
+        ZoneId zone = clock.getZone();
+        LocalDate today = LocalDate.now(clock);
+        LocalDate thisMonday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate nextMonday = thisMonday.plusWeeks(1);
+        LocalDate lastMonday = thisMonday.minusWeeks(1);
+
+        OffsetDateTime thisStart = thisMonday.atStartOfDay(zone).toOffsetDateTime();
+        OffsetDateTime nextStart = nextMonday.atStartOfDay(zone).toOffsetDateTime();
+        OffsetDateTime lastStart = lastMonday.atStartOfDay(zone).toOffsetDateTime();
+
+        BigDecimal thisMeters = cardioRepository.sumDistanceBetween(userId, thisStart, nextStart);
+        BigDecimal lastMeters = cardioRepository.sumDistanceBetween(userId, lastStart, thisStart);
+
+        BigDecimal thisKm = metersToKm(thisMeters);
+        BigDecimal lastKm = metersToKm(lastMeters);
+        BigDecimal deltaKm = thisKm.subtract(lastKm).setScale(2, RoundingMode.HALF_UP);
+        return new WeeklySummaryDto(thisKm, lastKm, deltaKm);
+    }
+
+    private static BigDecimal metersToKm(BigDecimal meters) {
+        return (meters == null ? BigDecimal.ZERO : meters)
+                .divide(BigDecimal.valueOf(1000), 2, RoundingMode.HALF_UP);
     }
 
     // ── AH-032 — start session ────────────────────────────────────────────

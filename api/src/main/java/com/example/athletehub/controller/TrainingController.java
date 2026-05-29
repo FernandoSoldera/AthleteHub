@@ -1,9 +1,12 @@
 package com.example.athletehub.controller;
 
+import com.example.athletehub.dto.CursorPage;
 import com.example.athletehub.dto.PatchSessionRequest;
 import com.example.athletehub.dto.StartSessionRequest;
 import com.example.athletehub.dto.TodayPlanResponse;
+import com.example.athletehub.dto.WeeklySummaryDto;
 import com.example.athletehub.dto.WorkoutSessionDto;
+import com.example.athletehub.dto.WorkoutSessionSummaryDto;
 import com.example.athletehub.security.UserPrincipal;
 import com.example.athletehub.service.TrainingService;
 import jakarta.validation.Valid;
@@ -16,6 +19,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -45,6 +49,19 @@ public class TrainingController {
         return trainingService.getTodayPlan(currentUserId(authentication));
     }
 
+    @GetMapping("/training/weekly-summary")
+    public WeeklySummaryDto weeklySummary(Authentication authentication) {
+        return trainingService.getWeeklySummary(currentUserId(authentication));
+    }
+
+    @GetMapping("/workout-sessions")
+    public CursorPage<WorkoutSessionSummaryDto> recentSessions(
+            Authentication authentication,
+            @RequestParam(value = "cursor", required = false) Long cursor,
+            @RequestParam(value = "limit", defaultValue = "20") int limit) {
+        return trainingService.listRecentSessions(currentUserId(authentication), cursor, clampLimit(limit));
+    }
+
     @PostMapping("/workout-sessions")
     @ResponseStatus(HttpStatus.CREATED)
     public WorkoutSessionDto startSession(Authentication authentication,
@@ -69,5 +86,11 @@ public class TrainingController {
         Object principal = authentication.getPrincipal();
         if (principal instanceof UserPrincipal up) return up.getId();
         throw new IllegalStateException("Unexpected principal: " + principal.getClass());
+    }
+
+    private int clampLimit(int requested) {
+        if (requested < 1) return 1;
+        if (requested > 100) return 100;
+        return requested;
     }
 }

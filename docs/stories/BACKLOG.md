@@ -76,7 +76,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-032 | Today's plan + start session | DONE | AH-031 |
 | AH-033 | Log/complete sets + finish session (volume, PR detection) | DONE | AH-032 |
 | AH-034 | Cardio logging (run/walk/cycle) | DONE | AH-030 |
-| AH-035 | Recent sessions + weekly cardio summary | TODO | AH-033, AH-034 |
+| AH-035 | Recent sessions + weekly cardio summary | DONE | AH-033, AH-034 |
 | AH-036 | Client: Train, live Workout (rest timer), Cardio screens + service | TODO | AH-033, AH-017 |
 
 ### EPIC 4 — Body / Evolution · [epic-4-body-evolution.md](epic-4-body-evolution.md)
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 22 done / 47. **Epic 1 + Epic 2 fully closed; Epic 3 (Training) 5/7 — schema + catalog + today/start + log/finish + cardio logging.**
+**Progress:** 23 done / 47. **Epic 1 + Epic 2 fully closed; Epic 3 backend done (6/7) — only AH-036 (Flutter client) remains to close the epic.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -567,10 +567,56 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     ordering across three types, no leakage between users, cursor
     walks pages, list without token → 401.
     Full backend suite: **110/110** (14 ITs + 3 unit).
-  - **Next:** **AH-035 — recent sessions + weekly cardio summary**:
-    `GET /api/workout-sessions?cursor=` (recent workout sessions
-    with volume/duration/sets/PR count from the rollups AH-033
-    persists) and `GET /api/training/weekly-summary` (this week's
-    cardio km + delta vs last week, for the Train chart). Closes
-    the backend half of Epic 3 — only AH-036 (Flutter client)
-    remains.
+  - **AH-035 DONE** — recent sessions + weekly cardio summary.
+    Closes the **backend half of Epic 3** — only AH-036 (Flutter
+    client) remains. Two endpoints:
+      * **`GET /api/workout-sessions?cursor=&limit=`** — newest-first
+        cursor pagination on id DESC. Both `in_progress` and
+        `completed` sessions surface; the client filters if it only
+        wants completed (matches reality: "what just happened" is
+        what users want to see). Returns a slim
+        `WorkoutSessionSummaryDto` (no exercises/sets) so a 20-row
+        page stays cheap — full hydrated view will land alongside
+        a single-session GET endpoint when needed.
+      * **`GET /api/training/weekly-summary`** —
+        `{thisWeekKm, lastWeekKm, deltaKm}`, all `BigDecimal(2)`.
+        ISO weeks (Mon 00:00 … next Mon 00:00) in the server's
+        default zone via the `Clock` bean. Week boundaries computed
+        with `TemporalAdjusters.previousOrSame(MONDAY)` so "today
+        is Monday" resolves to this week's start (not the previous
+        one). Negative delta when this week is lower —
+        `deltaKm = thisKm − lastKm`, signed.
+    New: `WorkoutSessionSummaryDto`, `WeeklySummaryDto`,
+    `WorkoutSessionRepository.findRecent`,
+    `CardioActivityRepository.sumDistanceBetween` (COALESCE to 0 so
+    callers don't null-check). `TrainingService` grew
+    `listRecentSessions` + `getWeeklySummary` + a tiny `metersToKm`
+    helper at scale 2 HALF_UP. `TrainingController` got the two
+    new endpoints; clamp/principal helpers stay shared.
+    `RecentSessionsAndWeeklySummaryIT` 12/12 (4 s) using the same
+    pinned `Clock` `@TestConfiguration` pattern as AH-032 (Wed
+    2026-05-27 → this week starts Mon 2026-05-25):
+      * recent list — empty case, newest-first w/ in-progress
+        included, per-user visibility, cursor pagination, summary
+        DTO omits `exercises` field, no token → 401.
+      * weekly — zero when no cardio, sums correctly into km with
+        delta vs last week, negative delta when this is lower,
+        ignores activities outside the two-week window (two-weeks-
+        ago + future), no leakage between users, no token → 401.
+    Full backend suite: **122/122** (15 ITs + 3 unit).
+    **MVP timezone note:** weekly bucketing uses the server's
+    default zone. A future timezone-aware version reads the user's
+    profile zone and recomputes the Monday boundary. For MVP this
+    is acceptable — every user sees a stable weekly window relative
+    to the server.
+  - **Next:** **AH-036 — Flutter client: Train / Workout / Cardio**.
+    Closes Epic 3.
+    Roughly: `services/api/training_api_service.dart` covering
+    today, weekly-summary, start/patch/finish session, recent
+    sessions, list+create cardio; `screens/train_screen.dart` (today
+    hero card with Start/Resume CTA, weekly cardio chart via
+    `fl_chart`, recent sessions list); `screens/workout_screen.dart`
+    (live session: exercise list, set rows with weight/reps/done,
+    client-side rest timer, running volume estimate, finish);
+    `screens/cardio_screen.dart` (run/walk/cycle form). Plain
+    `setState`; online-first with loading/error/empty states.
