@@ -109,7 +109,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
 | AH-070 | Schema: coach_athlete, assignments, eval_requests, coach_profiles | DONE | AH-010 |
-| AH-071 | Coach↔athlete invite + consent linking | TODO | AH-070, AH-016 |
+| AH-071 | Coach↔athlete invite + consent linking | DONE | AH-070, AH-016 |
 | AH-072 | Roster + adherence/flags + overview tiles | TODO | AH-071, AH-033 |
 | AH-073 | Student detail aggregate | TODO | AH-072, AH-042 |
 | AH-074 | Assign workout/diet/eval + schedule + library | TODO | AH-073, AH-030, AH-050 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 39 done / 47. **Epics 1–6 fully closed; Epic 7 (Coaching) opened with AH-070 schema.**
+**Progress:** 40 done / 47. **Epics 1–6 fully closed; Epic 7 (Coaching) 2/6 — schema + invite/consent linking.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1759,13 +1759,84 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     workout_sessions + cardio_activities pointers, delete
     eval_request nulls evaluations pointer.
     Full backend suite: **310/310** (28 ITs + 3 unit).
-  - **Next:** **AH-071 — coach↔athlete invite + consent linking**:
-    `POST /api/coach/invites` (coach invites an athlete by handle
-    → creates a `pending` coach_athlete row), `GET /api/me/coach-invites`
-    (athlete's pending invites), `POST /api/me/coach-invites/{id}/accept`
-    (flips status to active + sets `since` date) and `/decline`
-    (status to ended). Should reject double-invites (the UNIQUE
-    constraint handles half of it; service must short-circuit on
-    an existing pending/active row with a friendly code).
-    Probably also creates the `coach_profiles` row on first
-    activation if missing.
+  - **AH-071 DONE** — coach↔athlete invite + consent. Four
+    endpoints:
+      * **`POST /api/coach/invites`** — body `{handle}`. Finds
+        the athlete by handle (case-insensitive, same lookup as
+        `/api/users/{handle}`), validates the relationship doesn't
+        already exist as pending/active, creates a new `pending`
+        row or **revives an existing `ended` row** (same id; not
+        a new insert). Returns 201 with the hydrated invite DTO.
+      * **`GET /api/me/coach-invites`** — caller's pending inbox
+        (newest first). One batched user load for the coach side
+        per page; the athlete side is the same person across every
+        row so it's loaded once.
+      * **`POST /api/me/coach-invites/{id:\\d+}/accept`** — flips
+        the row to `active` + stamps `since = today` (via the
+        existing `Clock` bean). Author-scoped — only the addressed
+        athlete can accept.
+      * **`POST /api/me/coach-invites/{id:\\d+}/decline`** — flips
+        the row to `ended`. Same ownership rule.
+    **Sharp edges encoded:**
+      * **Find-or-revive dedup** — pending/active already exists
+        → 409 `COACH_LINK_EXISTS`; ended exists → flip back to
+        pending (no insert, no UNIQUE collision); none exists →
+        new row. The same coach-athlete pair never produces a
+        second `coach_athlete.id`.
+      * **Self-invite** short-circuits with a friendly 400
+        ("Cannot coach yourself") before the schema's
+        `coach_id <> athlete_id` CHECK would otherwise return 500.
+      * **Ownership + state guards** on accept/decline — caller
+        must be the addressed athlete (404 `INVITE_NOT_FOUND`
+        otherwise; same code for "doesn't exist" so timing /
+        status side channels don't leak existence) and the row
+        must still be `pending` (409 `INVITE_NOT_PENDING` if
+        already accepted or declined; distinct code so the client
+        can render "already handled" cleanly).
+    No role gate on the inviter — the COACH role flag drives the
+    UI's tab set but the API treats every authenticated user as
+    a potential coach. Users effectively become coaches by
+    sending invites and getting accepts; the role switch
+    (AH-016) just flips the UI.
+    Files added
+      * `model/CoachAthlete`
+      * `repository/CoachAthleteRepository` + `findByCoachIdAndAthleteId`,
+        `findByAthleteIdAndStatusOrderByIdDesc`
+      * `dto/{CoachInviteDto, CreateInviteRequest}`
+      * `service/CoachLinkService` — invite (find-or-revive),
+        listIncoming, accept, decline, `loadInviteFor` ownership
+        gate, `hydrate` helper
+      * `controller/CoachInviteController`
+      * `enums/MessageCode` + `COACH_LINK_EXISTS`,
+        `INVITE_NOT_FOUND`, `INVITE_NOT_PENDING`
+      * test: `CoachInvitesIT` (20 cases)
+    `CoachInvitesIT` 20/20 (20 s):
+      * **invite happy path + dedup matrix** — new row 201 with
+        both sides hydrated, unknown handle → 404, self → 400,
+        handle lookup case-insensitive, pending dup → 409
+        `COACH_LINK_EXISTS`, active dup → 409, ended → revives
+        same row back to pending (same id; one DB row), no token
+        → 401.
+      * **inbox** — returns pending only with coach hydrated,
+        excludes active + ended, outgoing-as-coach invites don't
+        leak into a coach's own inbox, no token → 401.
+      * **accept** — flips to active + sets `since`, non-target
+        → 404 `INVITE_NOT_FOUND`, unknown → 404, already-active
+        → 409 `INVITE_NOT_PENDING`.
+      * **decline** — flips to ended, non-target → 404,
+        already-active → 409.
+      * Accept/decline → 401 without token (both routes).
+    Full backend suite: **330/330** (29 ITs + 3 unit).
+    **Note on `coach_profiles`:** the row stays absent until a
+    dedicated "set up your coach card" endpoint lands (probably
+    AH-072 or its own small follow-up). The coach card on the
+    profile screen would just show defaults until then; not
+    blocking the AH-071 flow.
+  - **Next:** **AH-072 — roster + adherence/flags + overview
+    tiles**: `GET /api/coach/athletes?flag=...` (coach's active
+    roster, filtered by flag; covered by the
+    `idx_coach_athlete_coach_flag` index from AH-070), one tile
+    per athlete with latest activity / adherence / flag.
+    Adherence + flag are still nullable until the recompute job
+    (Epic 9) populates them — for MVP AH-072 surfaces them as
+    null and the client renders "new" / "—" placeholders.

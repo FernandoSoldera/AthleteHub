@@ -65,5 +65,10 @@ public enum MessageCode {
     POST_NOT_FOUND,
 
     // Feed (EPIC 6 — AH-063)
-    COMMENT_NOT_FOUND
+    COMMENT_NOT_FOUND,
+
+    // Coaching (EPIC 7 — AH-071)
+    COACH_LINK_EXISTS,
+    INVITE_NOT_FOUND,
+    INVITE_NOT_PENDING
 }
