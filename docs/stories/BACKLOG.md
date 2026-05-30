@@ -99,7 +99,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 ### EPIC 6 — Feed · [epic-6-feed.md](epic-6-feed.md)
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
-| AH-060 | Schema: posts, post_likes, post_comments | TODO | AH-010 |
+| AH-060 | Schema: posts, post_likes, post_comments | DONE | AH-010 |
 | AH-061 | Auto-create posts from workout/cardio/eval + manual posts | TODO | AH-060, AH-033 |
 | AH-062 | Feed timeline (fan-out-on-read) + filters + hydration | TODO | AH-061, AH-021 |
 | AH-063 | Like, comment, share | TODO | AH-062 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 33 done / 47. **Epics 1–5 all fully closed. Epic 6 (Feed) is next.**
+**Progress:** 34 done / 47. **Epics 1–5 fully closed; Epic 6 (Feed) opened with AH-060 schema.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1304,7 +1304,82 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
       * **Meal-label sections pre-fill the Add button** so the
         common "Breakfast → add eggs → add toast" flow is two
         taps less.
-  - **Next:** **Epic 6 (Feed)** opens with **AH-060**:
-    schema for `posts`, `post_likes`, `post_comments`. Same
-    pattern as the other epic openers — Flyway migration with
-    the MVP simplifications, schema-only IT.
+  - **AH-060 DONE** — Feed foundation. Flyway migration
+    `V20260529180000__create_feed_tables.sql` creates the three
+    feed tables per `02-data-model.md §4.3` with the MVP
+    simplifications spelled out in the migration header:
+      * no `client_uuid` (online-first; no offline reconciliation)
+      * no `image_media_id` FK yet — the `media_assets` table
+        arrives with Epic 9. The column exists so AH-061 can land
+        posts that reference a media row when Epic 9 ships, but
+        the FK constraint comes with that migration.
+      * no `feed_entries` materialized timeline — the architecture
+        spec flags this as a Phase 2 fan-out-on-write optimization;
+        MVP uses fan-out-on-read (AH-062 will scan `posts` directly
+        with the partial active-feed index).
+    Tables
+      * **`posts`** — one row per published item. `type ∈ {workout,
+        run, cycle, evolution, manual}` discriminates how the card
+        renders. `source_ref_type` + `source_ref_id` are a soft
+        link back to the row that triggered the auto-post (no FK
+        because we don't want a workout-session delete to be
+        blocked by a post; the soft link goes stale gracefully).
+        `payload` is a JSONB snapshot of what the card rendered at
+        publish time — coach renames an exercise tomorrow doesn't
+        rewrite yesterday's feed cards. `like_count` +
+        `comment_count` denormalized so a feed card render is O(1).
+        `visibility ∈ {public, followers, private}` defaults to
+        `followers`. Soft-delete via `deleted_at` so threads stay
+        consistent.
+      * **`post_likes`** — composite PK on (post_id, user_id)
+        enforces "one like per (post, user)" — a second tap is a
+        no-op at the data layer. CASCADE on both FKs.
+      * **`post_comments`** — soft-delete via `deleted_at` (collapse
+        a comment without orphaning the thread); body kept in place
+        for moderation audit. Hard delete only on GDPR.
+    Sharp edges encoded as CHECKs:
+      * **source_ref XOR** — `source_ref_type` and `source_ref_id`
+        are both null (manual post) or both set (auto-post).
+        Same pattern as body-fat ↔ method pairing (AH-040).
+      * `type` ∈ {workout, run, cycle, evolution, manual};
+        `visibility` ∈ {public, followers, private};
+        `source_ref_type` ∈ {workout_session, cardio_activity,
+        evaluation} when set.
+      * `like_count ≥ 0`, `comment_count ≥ 0` so the denormalized
+        counters can't go pathological.
+      * `LENGTH(body) > 0` on comments — no whitespace-only
+        comments slipping through.
+    Cascade choices:
+      * **delete post** → CASCADE to `post_likes` + `post_comments`.
+      * **delete user** → CASCADE to their authored posts (then
+        the post → likes / comments chain), and their own like /
+        comment rows directly.
+    Indexes documented in the spec are all present:
+      * `idx_posts_author_created (author_id, created_at DESC)` —
+        profile timeline reads.
+      * `idx_posts_feed_created_active (created_at DESC) WHERE
+        deleted_at IS NULL` — **partial** index for the hottest
+        query (home feed read), so soft-deleted posts don't bloat
+        the scan.
+      * `idx_post_likes_user (user_id, created_at DESC)` —
+        "what did I like recently?" / liker hydration.
+      * `idx_post_comments_post_created (post_id, created_at)` —
+        chronological thread loads.
+    `FeedSchemaIT` 11/11 (95 ms): tables + indexes present, type
+    CHECK rejects unknown + accepts all 5 valid values, visibility
+    CHECK rejects unknown + accepts 'public', source_ref XOR fires
+    in both directions and both legal shapes (manual = both null;
+    auto = both set) succeed, source_ref_type rejects unknown,
+    counters non-negative + default to zero, post_likes PK blocks
+    duplicate likes, post_comments body must be non-empty, delete
+    post → likes + comments cascade, delete user → their posts +
+    their likes + their comments cascade (other users' posts
+    survive).
+    Full backend suite: **240/240** (24 ITs + 3 unit).
+  - **Next:** **AH-061 — auto-create posts from workout/cardio/eval +
+    manual posts**: hook into `finishSession` (AH-033),
+    `cardio.create` (AH-034), `evaluation.create` (AH-041) so
+    each emits a post with the JSONB snapshot; add `POST /api/posts`
+    for the manual case. Probably introduces a `PostService` that
+    handles the snapshot serialization and the cascade ordering
+    (user → counter increment via `user_counters.posts`).
