@@ -101,7 +101,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 |----|-------|--------|-----------|
 | AH-060 | Schema: posts, post_likes, post_comments | DONE | AH-010 |
 | AH-061 | Auto-create posts from workout/cardio/eval + manual posts | DONE | AH-060, AH-033 |
-| AH-062 | Feed timeline (fan-out-on-read) + filters + hydration | TODO | AH-061, AH-021 |
+| AH-062 | Feed timeline (fan-out-on-read) + filters + hydration | DONE | AH-061, AH-021 |
 | AH-063 | Like, comment, share | TODO | AH-062 |
 | AH-064 | Client: Feed screen + card, like/comment + service | TODO | AH-063, AH-017 |
 
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 35 done / 47. **Epics 1–5 fully closed; Epic 6 (Feed) 2/5 — schema + auto-post + manual post / delete.**
+**Progress:** 36 done / 47. **Epics 1–5 fully closed; Epic 6 (Feed) 3/5 — schema + auto-post + feed timeline + profile feed.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1449,10 +1449,78 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     create evaluation → evolution post with
     source_ref_type=evaluation + correct ref id.
     Full backend suite: **254/254** (25 ITs + 3 unit).
-  - **Next:** **AH-062 — feed timeline + filters + hydration**:
-    `GET /api/feed?cursor=&filters=...` (home feed, fan-out-on-
-    read scanning the partial `idx_posts_feed_created_active`
-    index restricted to followees + self for `visibility =
-    followers`, all of `visibility = public`), `GET /api/users/{handle}/posts`
-    (profile feed). Hydrate author + counters + viewer's
-    `iLiked` flag in one batched read per page.
+  - **AH-062 DONE** — feed reads (home + profile) with hydration.
+    Two endpoints, both on the new `FeedController`:
+      * **`GET /api/feed?cursor=&limit=&type=...`** — home
+        timeline. Fan-out-on-read: viewer's own posts (any
+        visibility, including private) + their followees' posts
+        where visibility is not `private`. **Non-followed users'
+        public posts intentionally excluded** — that's a future
+        "explore" feed; the home timeline is purely follow-graph.
+      * **`GET /api/users/{handle}/posts?cursor=&limit=`** —
+        profile feed. Visibility derived from the viewer-author
+        relationship: self → all three; follower → public +
+        followers; stranger → public only.
+    Visibility logic centralized:
+    `FeedService.allowedVisibilitiesFor(viewerId, authorId)` is
+    the single chokepoint for profile-feed access. Home feed uses
+    the equivalent inline rule in the JPQL: `authorId = viewerId
+    OR visibility <> 'private'`, combined with the follows
+    subquery filter on the author.
+    Type filter accepts a comma-separated list
+    (`?type=workout,run`). Unknown values are silently dropped
+    (filtered set empty → unfiltered branch) rather than failing
+    the request — common-case forgiving.
+    **Hydration strategy:** two batched queries per page
+    regardless of page size — `userRepository.findAllById(authorIds)`
+    for the author DTOs + `postLikeRepository.findLikedPostIds(viewerId,
+    postIds)` for the viewer-scoped `iLiked` flag. The wire shape
+    is `{post, author, iLiked}` per item.
+    Cursor pagination on `id DESC` (surrogate id is monotonic and
+    roughly time-ordered; matches the `created_at DESC` the feed
+    wants in practice). Same `limit + 1` trick as elsewhere.
+    Files added
+      * `model/{PostLike, PostLikeKey}` — composite-PK entity for
+        the like row. AH-063 will add the write paths; AH-062
+        only needs the batched read for `iLiked`.
+      * `repository/PostLikeRepository` + `findLikedPostIds(viewerId,
+        Collection<Long>)`
+      * `dto/FeedItemDto` — `{post, author, iLiked}` wrapper
+      * `service/FeedService` + home / profile flows +
+        `allowedVisibilitiesFor` + `parseTypes` (csv → filtered
+        list, drops unknowns)
+      * `controller/FeedController`
+      * test: `FeedTimelineIT` (17 cases)
+    Files modified
+      * `repository/PostRepository` + `findHomeFeed`,
+        `findHomeFeedByTypes`, `findProfileFeed` — three JPQL
+        queries that hit the partial
+        `idx_posts_feed_created_active` index from AH-060.
+    `FeedTimelineIT` 17/17 (18 s):
+      * **home feed visibility matrix** — empty when no posts;
+        own posts all visibilities visible; followee public +
+        followers visible; followee private excluded; non-followed
+        users' posts excluded (even public).
+      * **home feed mechanics** — soft-deleted posts excluded;
+        newest-first cursor pagination walks pages; type filter
+        narrows to single + comma-separated lists; unknown type
+        silently drops to unfiltered.
+      * **hydration** — author surfaces with handle, iLiked is
+        true when viewer liked, false when only someone else did.
+      * **profile feed visibility matrix** — self sees all three
+        visibilities, follower sees public + followers, stranger
+        sees public only.
+      * **profile feed mechanics** — soft-deleted excluded, unknown
+        handle → 404, no token → 401 (both endpoints), cursor
+        pagination walks pages.
+    Full backend suite: **271/271** (26 ITs + 3 unit).
+  - **Next:** **AH-063 — like / comment / share**:
+    `POST /api/posts/{id}/likes` + `DELETE /api/posts/{id}/likes`
+    (idempotent — second tap is a no-op like favorites);
+    `POST /api/posts/{id}/comments` + `DELETE
+    /api/comments/{id}` (author-scoped soft-delete);
+    `GET /api/posts/{id}/comments?cursor=` (chronological thread);
+    counter maintenance on `posts.like_count` + `comment_count`.
+    Share is a client-side concern (`Share.share()` in Flutter,
+    not a backend endpoint) so AH-063 backend lands only the
+    first four.
