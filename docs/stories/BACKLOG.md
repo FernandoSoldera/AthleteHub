@@ -112,7 +112,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-071 | Coach↔athlete invite + consent linking | DONE | AH-070, AH-016 |
 | AH-072 | Roster + adherence/flags + overview tiles | DONE | AH-071, AH-033 |
 | AH-073 | Student detail aggregate | DONE | AH-072, AH-042 |
-| AH-074 | Assign workout/diet/eval + schedule + library | TODO | AH-073, AH-030, AH-050 |
+| AH-074 | Assign workout/diet/eval + schedule + library | DONE | AH-073, AH-030, AH-050 |
 | AH-075 | Client: Students, Student detail, Assign, Schedule, Library, Coach profile | TODO | AH-074, AH-017 |
 
 ### EPIC 8 — Messaging · [epic-8-messaging.md](epic-8-messaging.md)
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 42 done / 47. **Epics 1–6 fully closed; Epic 7 (Coaching) 4/6 — schema + invite + roster + student detail.**
+**Progress:** 43 done / 47. **Epics 1–6 fully closed; Epic 7 backend done (5/6) — only AH-075 (Flutter coach screens) remains to close the epic.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1947,14 +1947,97 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     needed an explicit import in `CoachLinkService` since the
     service lives in a different package from the DTO. Fixed
     the compile + re-ran clean.
-  - **Next:** **AH-074 — assign workout/diet/eval + schedule +
-    library**: finally writes to the `assignments` table that
-    AH-070 created. `POST /api/coach/athletes/{id}/assignments`
-    (body `{type, refType?, refId?, scheduledFor?, notes?}`),
-    `PATCH /api/coach/assignments/{id}` for reschedule /
-    status flips, `DELETE /api/coach/assignments/{id}`. Athlete
-    side: `GET /api/me/assignments?status=` to see what the
-    coach has lined up. This is where the AH-030 / AH-034 / AH-041
-    `assignment_id` FKs finally get stamped — finishing a session
-    that originated from an assignment marks the assignment
-    `done`.
+  - **AH-074 DONE** — assignments CRUD. **Closes the backend
+    half of Epic 7.** Five endpoints across the coach and athlete
+    sides:
+      * **`POST /api/coach/athletes/{athleteId:\\d+}/assignments`**
+        — coach creates. Body `{type, refType?, refId?,
+        scheduledFor?, notes?}`. Bean validation: type ∈ {workout,
+        diet, eval}; refType ∈ {workout_template, diet_plan,
+        eval_request} when present; ref pair XOR pre-validated
+        in the service for a friendly 400 before the schema CHECK
+        would 500. Defaults `status = "scheduled"`.
+      * **`GET /api/coach/athletes/{athleteId:\\d+}/assignments?status=&scheduledOn=&cursor=&limit=`**
+        — coach lists assignments for one athlete. Filters honored
+        when present; nulls ignored.
+      * **`PATCH /api/coach/assignments/{id:\\d+}`** — coach
+        updates `status` / `scheduledFor` / `notes`. Partial
+        update — fields absent in the payload aren't touched.
+        Refs aren't modifiable (recreate to rebuild).
+      * **`DELETE /api/coach/assignments/{id:\\d+}`** — coach
+        removes (204). Hard delete; the `SET NULL` FKs on
+        `workout_sessions.assignment_id` + `cardio_activities.assignment_id`
+        from AH-070 handle the historical references gracefully.
+      * **`GET /api/me/assignments?status=&scheduledOn=&cursor=&limit=`**
+        — athlete lists their own assignments across all active
+        relationships. Empty page when no active coach.
+    **Visibility chokepoint** — every coach-side mutation /
+    listing runs through `activeRelationshipOrThrow`; every
+    individual mutation (PATCH, DELETE) additionally walks the
+    assignment → relationship → coach chain via
+    `loadOwnedByCoach`. All gates return 404
+    `ASSIGNMENT_NOT_FOUND` (or `RESOURCE_NOT_FOUND` for
+    relationship-level misses) so the API doesn't leak existence
+    via timing — same pattern as the student detail view.
+    Cross-athlete leakage is impossible because the
+    relationship-id filter is anchored to the resolved coach side.
+    **Auto-completion via session/activity/evaluation linking
+    deferred** — for AH-074 the coach manually flips assignment
+    status. When the athlete starts a session from an assignment,
+    the `workout_sessions.assignment_id` column gets stamped (the
+    FK is already in place from AH-070), but the "finish session
+    → flip assignment to done" hook lands in a follow-up. Same
+    deferral for cardio + evaluation.
+    Files added
+      * `model/Assignment`
+      * `repository/AssignmentRepository` — 4 queries (per-
+        relationship + multi-relationship × with-date / without-
+        date) because PostgreSQL can't infer the type of a null
+        LocalDate through JPQL's `:param IS NULL` pattern (PG
+        error 42P18). Same null-param query-split trick as the
+        exercise catalog (AH-031).
+      * `dto/{AssignmentDto, CreateAssignmentRequest, PatchAssignmentRequest}`
+      * `service/AssignmentService` — `create`, `update`,
+        `delete`, `listForAthlete`, `listMine`, plus the
+        `activeRelationshipOrThrow` + `loadOwnedByCoach` gates
+        and a shared `page()` helper.
+      * `controller/AssignmentController` — all 5 routes.
+      * `enums/MessageCode` + `ASSIGNMENT_NOT_FOUND`.
+      * test: `AssignmentsIT` (26 cases)
+    `AssignmentsIT` 26/26 (26 s):
+      * **create** — happy path 201 with defaults; full ref pair
+        round-trips; half ref pair → 400; unknown type / refType
+        → 400; no relationship → 404; non-coach → 404; pending
+        relationship → 404 (active only); no token → 401.
+      * **update** — patches status / scheduledFor / notes;
+        partial update doesn't touch absent fields; unknown
+        status → 400; non-coach → 404 `ASSIGNMENT_NOT_FOUND`;
+        unknown id → 404.
+      * **delete** — 204 + row gone; non-coach → 404.
+      * **list for athlete** — only this relationship's
+        assignments (no other coach's); status filter; date
+        filter (`scheduledOn=2026-06-01`); non-coach → 404.
+      * **list mine** — athlete sees their own; empty when no
+        active relationship; no leakage when same coach has
+        multiple athletes; status filter; no token → 401.
+      * **pagination** — cursor walks id-DESC pages correctly.
+    Full backend suite: **382/382** (32 ITs + 3 unit).
+    **Sharp edge caught the first time around** — same null-
+    LocalDate type-inference bug as AH-031 (PG error 42P18 —
+    "could not determine data type of parameter $4"). Fix:
+    repository methods split into "with date filter" vs
+    "without". Service dispatches based on whether the param is
+    null. Same trick can be reapplied to any future query with
+    a nullable date filter; AH-052's `?date=` on the diet day
+    endpoint avoided this because the param was required, not
+    `:param IS NULL`-ed.
+  - **Next:** **AH-075 — Flutter coach screens**. Closes Epic 7.
+    Coach-mode tab set: Students (roster), Student detail,
+    Assign (create / edit / schedule), Library (templates +
+    plans the coach reuses), Coach profile (headline + bio,
+    backed by `coach_profiles` — needs a small set-up endpoint
+    if AH-072 deferred it). Plus athlete-side surfacing of
+    invites + assignments. Probably also the role-switch UI to
+    flip between athlete and coach tab sets (`UserResponse.roles`
+    + `PATCH /api/me/roles/switch` are already in place from
+    AH-016).

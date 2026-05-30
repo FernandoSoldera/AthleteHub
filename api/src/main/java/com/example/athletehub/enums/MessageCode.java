@@ -70,5 +70,8 @@ public enum MessageCode {
     // Coaching (EPIC 7 — AH-071)
     COACH_LINK_EXISTS,
     INVITE_NOT_FOUND,
-    INVITE_NOT_PENDING
+    INVITE_NOT_PENDING,
+
+    // Coaching (EPIC 7 — AH-074)
+    ASSIGNMENT_NOT_FOUND
 }
