@@ -3,8 +3,13 @@ package com.example.athletehub.service;
 import com.example.athletehub.dto.CoachInviteDto;
 import com.example.athletehub.dto.CreateInviteRequest;
 import com.example.athletehub.dto.CursorPage;
+import com.example.athletehub.dto.EvaluationSummaryDto;
 import com.example.athletehub.dto.MyCoachDto;
+import com.example.athletehub.dto.PublicUserDto;
 import com.example.athletehub.dto.RosterEntryDto;
+import com.example.athletehub.dto.StudentDetailDto;
+import com.example.athletehub.dto.WeeklySummaryDto;
+import com.example.athletehub.dto.WorkoutSessionSummaryDto;
 import com.example.athletehub.enums.MessageCode;
 import com.example.athletehub.exception.BadRequestException;
 import com.example.athletehub.exception.ConflictException;
@@ -51,6 +56,8 @@ public class CoachLinkService {
 
     private final CoachAthleteRepository coachAthleteRepository;
     private final UserRepository userRepository;
+    private final TrainingService trainingService;
+    private final EvaluationService evaluationService;
     private final Clock clock;
 
     // ── invite ────────────────────────────────────────────────────────────
@@ -196,6 +203,46 @@ public class CoachLinkService {
                     return MyCoachDto.from(row, coach);
                 })
                 .orElse(null);
+    }
+
+    // ── AH-073 student detail aggregate ───────────────────────────────────
+
+    /**
+     * Coach's deep-dive view of one athlete. Visibility gate: the caller
+     * must be the coach on an {@code active} relationship — "not yours"
+     * and "doesn't exist" both return {@code RESOURCE_NOT_FOUND} (404)
+     * so the API doesn't leak existence via differential status. Then
+     * composes the latest evaluation + weekly cardio summary + the last
+     * 5 sessions by reusing the existing rollup readers.
+     */
+    @Transactional(readOnly = true)
+    public StudentDetailDto getStudentDetail(Long coachId, Long athleteId) {
+        CoachAthlete row = coachAthleteRepository
+                .findByCoachIdAndAthleteId(coachId, athleteId)
+                .filter(r -> "active".equals(r.getStatus()))
+                .orElseThrow(() -> new ResourceNotFoundException(MessageCode.RESOURCE_NOT_FOUND));
+
+        User athlete = userRepository.findById(athleteId)
+                .orElseThrow(() -> new ResourceNotFoundException(MessageCode.RESOURCE_NOT_FOUND));
+
+        // Reuse the existing rollup endpoints' read paths.
+        List<WorkoutSessionSummaryDto> recentSessions =
+                trainingService.listRecentSessions(athleteId, null, 5).items();
+        WeeklySummaryDto weekly = trainingService.getWeeklySummary(athleteId);
+        List<EvaluationSummaryDto> latest = evaluationService.listRecent(athleteId, null, 1).items();
+
+        return new StudentDetailDto(
+                row.getId(),
+                row.getStatus(),
+                row.getSince(),
+                row.getGoal(),
+                row.getFlag(),
+                row.getAdherencePct(),
+                row.getLastActivityAt(),
+                PublicUserDto.from(athlete),
+                latest.isEmpty() ? null : latest.get(0),
+                weekly,
+                recentSessions);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────

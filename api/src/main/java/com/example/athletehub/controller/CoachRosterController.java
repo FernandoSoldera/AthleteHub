@@ -3,11 +3,13 @@ package com.example.athletehub.controller;
 import com.example.athletehub.dto.CursorPage;
 import com.example.athletehub.dto.MyCoachDto;
 import com.example.athletehub.dto.RosterEntryDto;
+import com.example.athletehub.dto.StudentDetailDto;
 import com.example.athletehub.security.UserPrincipal;
 import com.example.athletehub.service.CoachLinkService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -45,6 +47,12 @@ public class CoachRosterController {
     @GetMapping("/me/coach")
     public MyCoachDto myCoach(Authentication authentication) {
         return coachLinkService.getMyCoach(currentUserId(authentication));
+    }
+
+    @GetMapping("/coach/athletes/{id:\\d+}")
+    public StudentDetailDto studentDetail(Authentication authentication,
+                                          @PathVariable("id") Long id) {
+        return coachLinkService.getStudentDetail(currentUserId(authentication), id);
     }
 
     private Long currentUserId(Authentication authentication) {

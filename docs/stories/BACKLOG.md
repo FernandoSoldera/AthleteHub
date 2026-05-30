@@ -111,7 +111,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-070 | Schema: coach_athlete, assignments, eval_requests, coach_profiles | DONE | AH-010 |
 | AH-071 | Coach↔athlete invite + consent linking | DONE | AH-070, AH-016 |
 | AH-072 | Roster + adherence/flags + overview tiles | DONE | AH-071, AH-033 |
-| AH-073 | Student detail aggregate | TODO | AH-072, AH-042 |
+| AH-073 | Student detail aggregate | DONE | AH-072, AH-042 |
 | AH-074 | Assign workout/diet/eval + schedule + library | TODO | AH-073, AH-030, AH-050 |
 | AH-075 | Client: Students, Student detail, Assign, Schedule, Library, Coach profile | TODO | AH-074, AH-017 |
 
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 41 done / 47. **Epics 1–6 fully closed; Epic 7 (Coaching) 3/6 — schema + invite + roster.**
+**Progress:** 42 done / 47. **Epics 1–6 fully closed; Epic 7 (Coaching) 4/6 — schema + invite + roster + student detail.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1886,12 +1886,75 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
         coach A and an ended past coach B still gets null); no
         cross-athlete leakage; no token → 401.
     Full backend suite: **345/345** (30 ITs + 3 unit).
-  - **Next:** **AH-073 — student detail aggregate**:
-    `GET /api/coach/athletes/{id:\\d+}` — coach view of one
-    student. Hydrates the relationship row + the athlete's
-    recent training (sessions + cardio summary, AH-035 reuse) +
-    their latest evaluation (AH-042 reuse) + assignment status.
-    The aggregate is the "Student detail" screen — coach's
-    deep-dive view of one athlete. Visibility gate must verify
-    the caller is the coach on an active relationship; 404
-    otherwise.
+  - **AH-073 DONE** — student detail aggregate. One endpoint
+    composing existing rollup readers under a single visibility
+    gate:
+      * **`GET /api/coach/athletes/{id:\\d+}`** — coach's
+        deep-dive view of one athlete. Returns the relationship
+        row (status / since / goal / flag / adherence /
+        last_activity_at) + athlete `PublicUserDto` + latest
+        evaluation (or null) + weekly cardio summary (zeros when
+        no data) + last 5 workout sessions (empty when none).
+        Visibility: caller must be the coach on an **active**
+        relationship — 404 `RESOURCE_NOT_FOUND` for non-coach /
+        pending / ended / wrong-direction / unknown-athlete (same
+        code so no existence-vs-permission leak).
+    **Reuse strategy** — no new rollup queries. The service
+    delegates to:
+      * `TrainingService.listRecentSessions(athleteId, null, 5)`
+        — already returns the slim summary DTO with the AH-033
+        rollup fields.
+      * `TrainingService.getWeeklySummary(athleteId)` — already
+        windowed via the `Clock` bean.
+      * `EvaluationService.listRecent(athleteId, null, 1)` —
+        takes the first item or null for "latest evaluation".
+    Same `Clock` bean is shared; the IT pins it for a
+    deterministic weekly window (Wed 2026-05-27).
+    Assignment status hangs off the relationship row in AH-074;
+    the DTO has room for it (currently no field — will add as
+    `assignments: List<AssignmentDto>` when AH-074 lands).
+    Files added
+      * `dto/StudentDetailDto` — record carrying every section
+        + the relationship metadata.
+      * test: `CoachStudentDetailIT` (11 cases) with
+        `FixedClockConfig` pinned at Wed 2026-05-27.
+    Files modified
+      * `service/CoachLinkService` + `getStudentDetail`, plus
+        new deps on `TrainingService` and `EvaluationService`
+        (no circular risk — both are leaf services).
+      * `controller/CoachRosterController` + the new GET endpoint
+        on `/coach/athletes/{id:\\d+}`.
+    `CoachStudentDetailIT` 11/11 (17 s):
+      * **happy path** — full rollup composes correctly:
+        relationship row passes through verbatim (flag,
+        adherence, goal), athlete handle hydrated, latest
+        evaluation id matches seeded row, weekly cardio reflects
+        the 5 km run inside the window, recent sessions surface
+        the seeded session with rollup fields.
+      * **empty states** — null flag / adherence pass through,
+        latestEvaluation is null when none logged, recentSessions
+        is `[]`, weeklyCardio is **never null** (all-zero shape).
+      * recent sessions cap at 5 even when 8 exist.
+      * **visibility matrix** — another coach → 404; pending
+        relationship → 404 (only active); ended → 404; athlete
+        calling their own detail at the coach path → 404;
+        no relationship → 404; unknown athlete id → 404; no
+        token → 401.
+      * **data isolation** — stranger's sessions don't leak into
+        the target athlete's detail.
+    Full backend suite: **356/356** (31 ITs + 3 unit).
+    **Sharp edge caught the first time around** — `PublicUserDto`
+    needed an explicit import in `CoachLinkService` since the
+    service lives in a different package from the DTO. Fixed
+    the compile + re-ran clean.
+  - **Next:** **AH-074 — assign workout/diet/eval + schedule +
+    library**: finally writes to the `assignments` table that
+    AH-070 created. `POST /api/coach/athletes/{id}/assignments`
+    (body `{type, refType?, refId?, scheduledFor?, notes?}`),
+    `PATCH /api/coach/assignments/{id}` for reschedule /
+    status flips, `DELETE /api/coach/assignments/{id}`. Athlete
+    side: `GET /api/me/assignments?status=` to see what the
+    coach has lined up. This is where the AH-030 / AH-034 / AH-041
+    `assignment_id` FKs finally get stamped — finishing a session
+    that originated from an assignment marks the assignment
+    `done`.
