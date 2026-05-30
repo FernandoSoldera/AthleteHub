@@ -103,7 +103,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-061 | Auto-create posts from workout/cardio/eval + manual posts | DONE | AH-060, AH-033 |
 | AH-062 | Feed timeline (fan-out-on-read) + filters + hydration | DONE | AH-061, AH-021 |
 | AH-063 | Like, comment, share | DONE | AH-062 |
-| AH-064 | Client: Feed screen + card, like/comment + service | TODO | AH-063, AH-017 |
+| AH-064 | Client: Feed screen + card, like/comment + service | DONE | AH-063, AH-017 |
 
 ### EPIC 7 — Coaching · [epic-7-coaching.md](epic-7-coaching.md)
 | ID | Story | Status | Depends on |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 37 done / 47. **Epics 1–5 fully closed; Epic 6 backend done (4/5) — only AH-064 (Flutter client) remains to close the epic.**
+**Progress:** 38 done / 47. **Epics 1–6 all fully closed. Epic 7 (Coaching) is next.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1593,15 +1593,93 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     No backend endpoint needed (would add nothing analytics-wise
     that we couldn't derive from the link visit later).
     Full backend suite: **294/294** (27 ITs + 3 unit).
-  - **Next:** **AH-064 — Flutter client: Feed screen + card,
-    like/comment + service.** Closes Epic 6. Models mirror the
-    backend DTOs (`Post`, `FeedItem`, `Comment`, requests); a
-    `feed_api_service.dart` covers the 7 endpoints (home + profile
-    feed, manual post + delete, like + unlike, comments
-    list/add/delete); `screens/feed_screen.dart` renders the
-    home tab with a card-per-post layout (type-specific snapshot
-    rendering from `payload`, like + comment counters with
-    optimistic flip, share button via Flutter's `share_plus`);
-    `screens/comment_thread_screen.dart` opens on tap → shows
-    the thread + compose. Replaces the Feed tab placeholder in
-    main_shell.
+  - **AH-064 DONE** — Flutter Feed + card + threads + manual
+    compose. **Closes Epic 6.** Three models mirror the backend
+    DTOs (`Post`, `FeedItem`, `Comment`); one service; one
+    custom-painted card widget; three screens; main_shell wired.
+    Files added
+      * `models/responses/{post, feed_item, comment}.dart` —
+        manual `fromJson` per CONVENTIONS. `Post.payload` is
+        `Map<String, dynamic>?` (carries the per-type snapshot);
+        `Post.copyWith` lets the feed screen flip
+        `likeCount`/`commentCount` optimistically.
+      * `services/api/feed_api_service.dart` — 9 methods covering
+        the AH-061/062/063 surface: `homeFeed`, `profileFeed`,
+        `createManualPost`, `deletePost`, `like`, `unlike`,
+        `listComments`, `addComment`, `deleteComment`.
+      * `widgets/feed_card.dart` — per-card layout with
+        type-specific snapshot rendering (workout / run / cycle /
+        evolution / manual). Reads `post.payload` as
+        `Map<String, dynamic>` and extracts the fields each type
+        carries:
+          - workout → title, volume, sets, PRs, duration
+          - run/cycle → distance km, duration, pace, avg HR, kcal
+          - evolution → weight, body-fat %, method
+          - manual → title + note (and `(empty post)` fallback)
+        Visibility badge (`lock_outline` for private,
+        `group_outlined` for followers, none for public). Type
+        icon top-right.
+      * `screens/feed_screen.dart` — home tab. Pull-to-refresh,
+        infinite scroll via `NotificationListener` on the
+        `ScrollNotification` (load more at maxScrollExtent − 400),
+        type filter chip row (`all / workout / run / cycle /
+        evolution / manual`) that re-runs the initial load,
+        AppBar action for Find People (moved from the old
+        `_FeedTab` placeholder), extended FAB → NewPostSheet.
+        **Optimistic like flip** — local state updates first
+        (toggle `iLiked`, ±1 on `likeCount`), then fires the
+        request; revert on `ApiException`.
+      * `screens/comment_thread_screen.dart` — chronological
+        thread with compose box pinned to bottom. Infinite scroll
+        for paginated thread; **swipe-to-delete only on the
+        viewer's own comments** (gated by comparing
+        `comment.author?.id` to the cached user's id). Server
+        still returns 404 if someone tries to delete a non-owned
+        comment; the client just hides the affordance.
+      * `screens/new_post_sheet.dart` — manual-post compose. Title
+        (optional, max 200) + note (optional, max 2000) + a
+        `SegmentedButton` visibility picker (public / followers /
+        private). Validates locally that at least one of title/note
+        is supplied before hitting the API. Returns true on save
+        so the feed refreshes.
+    Files modified
+      * `main_shell.dart` — Feed tab now hosts `FeedScreen`
+        (replaces the placeholder `_FeedTab` inner class). The
+        Find People AppBar action moved with it. Removed the
+        dead `find_people_screen.dart` import.
+    Verification
+      * `flutter analyze` clean (after two minor cleanups — an
+        unused `tt` local + an unnecessary string-interp brace).
+      * `flutter test` 2/2 green.
+      * No backend changes — 294/294 still green.
+    Design choices captured
+      * **Type filter is a single string param** (matches the
+        backend's comma-CSV contract). Selecting "All" passes
+        `null`; selecting any other chip passes the single value.
+        Multi-select would extend cleanly to comma-joining the
+        ChoiceChip selections.
+      * **No reload after comment thread closes** — the per-card
+        `commentCount` may drift slightly until the next pull-to-
+        refresh, but re-fetching the whole feed on every back-press
+        feels heavy. Acceptable UX tradeoff.
+      * **Optimistic like only the count, not the card position**
+        — un-liking from the feed doesn't move the card. Cleaner
+        than reflowing the list.
+      * **Share intentionally deferred** — `share_plus` isn't on
+        pubspec yet and adding the dep would inflate this story.
+        The card layout has room for a share icon when the dep
+        lands; could be a small follow-up story.
+      * **Manual-post sheet enforces "title OR note"** locally to
+        avoid a 201 on a meaningless empty post. The backend
+        accepts an empty payload (kept loose for future
+        image-only posts in Epic 9) but the client's UX layer
+        nudges toward content.
+  - **Next:** **Epic 7 (Coaching)** opens with **AH-070**:
+    schema for `coach_athlete` (the consent link), `assignments`
+    (workout/cardio/diet/eval tasks for an athlete), `eval_requests`
+    (coach asks for an evaluation), and `coach_profiles`
+    (bio / specialties / pricing — public-facing card data).
+    First time we land the `assignments` FK targets that AH-030,
+    AH-034, AH-041, AH-050 reserved enum values for; this is
+    where the `source = 'coach'` / `source = 'assigned'` paths
+    get hooked up to a real reference.

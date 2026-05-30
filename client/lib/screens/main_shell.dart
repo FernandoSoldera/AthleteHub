@@ -4,7 +4,7 @@ import '../i18n/app_localizations.dart';
 import '../services/secure_storage_service.dart';
 import 'diet_screen.dart';
 import 'evolution_screen.dart';
-import 'find_people_screen.dart';
+import 'feed_screen.dart';
 import 'placeholder_screen.dart';
 import 'profile_screen.dart';
 import 'train_screen.dart';
@@ -56,7 +56,7 @@ class _MainShellState extends State<MainShell> {
       body: IndexedStack(
         index: _index,
         children: [
-          _FeedTab(title: tabs[0].label, icon: tabs[0].icon),
+          const FeedScreen(),
           const TrainScreen(),
           const EvolutionScreen(),
           const DietScreen(),
@@ -79,47 +79,6 @@ class _MainShellState extends State<MainShell> {
               label: t.label,
             ),
         ],
-      ),
-    );
-  }
-}
-
-/// Feed tab with a Find People action in the AppBar — the real feed lands
-/// in AH-064 (EPIC 6).
-class _FeedTab extends StatelessWidget {
-  const _FeedTab({required this.title, required this.icon});
-
-  final String title;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-        centerTitle: false,
-        actions: [
-          IconButton(
-            tooltip: 'Find people',
-            icon: const Icon(Icons.person_search_outlined),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const FindPeopleScreen()),
-            ),
-          ),
-        ],
-      ),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 56, color: cs.primary),
-            const SizedBox(height: 12),
-            Text(title, style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 6),
-            Text('Coming soon', style: Theme.of(context).textTheme.bodySmall),
-          ],
-        ),
       ),
     );
   }
