@@ -113,14 +113,14 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-072 | Roster + adherence/flags + overview tiles | DONE | AH-071, AH-033 |
 | AH-073 | Student detail aggregate | DONE | AH-072, AH-042 |
 | AH-074 | Assign workout/diet/eval + schedule + library | DONE | AH-073, AH-030, AH-050 |
-| AH-075 | Client: Students, Student detail, Assign, Schedule, Library, Coach profile | TODO | AH-074, AH-017 |
+| AH-075 | Client: Students, Student detail, Assign, Schedule, Library, Coach profile | DONE | AH-074, AH-017 |
 
 ### EPIC 8 — Messaging · [epic-8-messaging.md](epic-8-messaging.md)
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
-| AH-080 | Schema: conversations, participants, messages | TODO | AH-070 |
-| AH-081 | Conversations + messages endpoints (polling) + read state | TODO | AH-080 |
-| AH-082 | Client: Inbox + chat screens + service | TODO | AH-081, AH-017 |
+| AH-080 | Schema: conversations, participants, messages | DONE | AH-070 |
+| AH-081 | Conversations + messages endpoints (polling) + read state | DONE | AH-080 |
+| AH-082 | Client: Inbox + chat screens + service | DONE | AH-081, AH-017 |
 
 ### EPIC 9 — Notifications & Media · [epic-9-notifications-media.md](epic-9-notifications-media.md)
 | ID | Story | Status | Depends on |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 43 done / 47. **Epics 1–6 fully closed; Epic 7 backend done (5/6) — only AH-075 (Flutter coach screens) remains to close the epic.**
+**Progress:** 47 done / 55. **Epics 1–8 fully closed.** Remaining stories all live in operational epics (9 notifications/media, 10 hardening/CI).
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -2041,3 +2041,121 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     flip between athlete and coach tab sets (`UserResponse.roles`
     + `PATCH /api/me/roles/switch` are already in place from
     AH-016).
+- **2026-05-30** — Epic 7 closed.
+  - **AH-075 DONE** — Flutter coach screens. **Closes Epic 7.**
+    Backend follow-up: added `CoachProfile` JPA entity +
+    `coach_profiles` repository and extended
+    `CoachRosterController` with `GET / PUT /api/me/coach-profile`
+    so the client can hydrate / upsert the headline +
+    yearsExperience. `getMyCoachProfile` uses a **lazy default**
+    pattern — first read returns a zeroed `CoachProfileDto`
+    without persisting a row; the row is created on the first
+    upsert. `upsertMyCoachProfile` does a partial update
+    (`null` fields are left untouched), validated by
+    `UpdateCoachProfileRequest` (`@Size(max=200)` on headline,
+    `@Min(0) @Max(80)` on years). Added 5 tests to
+    `CoachRosterIT` covering lazy default, upsert + reread,
+    partial update preservation, out-of-range rejection, and
+    401-without-token. Whole backend suite green (20/20 in
+    CoachRosterIT; 30+ IT classes pass).
+  - **Flutter client.** Six new models in `lib/models/responses/`
+    mirroring the backend DTOs: `CoachInvite`, `RosterEntry`,
+    `MyCoach`, `StudentDetail`, `Assignment`, `CoachProfile`.
+    One new service: `coach_api_service.dart` covers AH-071
+    (sendInvite / myInvites / accept / decline), AH-072
+    (roster + myCoach), AH-073 (studentDetail), AH-074
+    (create / list / patch / delete assignments + my
+    assignments), and AH-075 (myCoachProfile / update). Added a
+    `put` verb to `HttpInterceptor`. Six new screens +
+    sheets: `PendingInvitesScreen`, `MyAssignmentsScreen`,
+    `StudentsScreen`, `StudentDetailScreen`, `AssignSheet`,
+    `InviteAthleteSheet`, `CoachProfileSetupScreen`.
+  - **Single profile screen pattern.** Instead of an alternate
+    tab shell behind the role switch, the coaching hub is a
+    "COACHING" / "COACH TOOLS" section appended to the
+    viewer's own `ProfileScreen` (only when `_isMe`). Athlete
+    actions (invites inbox, my assignments, current coach card)
+    and coach actions (my athletes, coach profile) coexist on
+    the same surface, with the athlete-only "Coach: …" card
+    rendered when `GET /api/me/coach` returns a row. The role
+    switch can still flip server-side capabilities, but the UI
+    no longer needs two tab trees — a deliberate MVP
+    simplification (Option B from earlier discussion).
+  - **`GET /api/me/coach` null-body handling.** The endpoint
+    returns 200 with an empty body when the athlete has no
+    coach (Spring writes nothing for a null return value). The
+    service trims and treats empty / "null" body as null
+    instead of trying to decode and crashing.
+  - **Flutter:** `flutter analyze` clean (after switching two
+    `(_, __) => …` lambdas to `(_, _) => …` per the new
+    `unnecessary_underscores` lint); `flutter test` green
+    (2/2). `main_shell.dart` doc comment updated to reflect
+    that Epic 7 lands inside the existing tab set rather than
+    a separate coach mode.
+  - **MVP COMPLETE.** Epics 1–7 closed (44/55 stories). The
+    remaining stories all live in post-MVP epics — Epic 8
+    (messaging), Epic 9 (notifications + media), Epic 10
+    (hardening + CI). The product is now end-to-end usable as
+    an athlete + coach platform: auth, social graph, training,
+    evolution, diet, feed, and coaching all wired through.
+- **2026-05-30 (later)** — Epic 8 closed.
+  - **AH-080 DONE** — messaging schema. V20260530130000
+    creates `conversations` (with `coach_athlete_id` partial-
+    unique + `last_message_at`/`last_message_preview`
+    denormalised inbox fields, preview length-capped at 280),
+    `conversation_participants` (composite PK on
+    `(conversation_id, user_id)` + `last_read_message_id`
+    *unconstrained* — a stale pointer past the latest message
+    is harmless, treated as zero unread), and `messages`
+    (body 1..4000 CHECK, `attachment_media_id` as a soft int8
+    with no FK so AH-092 can wire it without rewriting
+    callers, INDEX `(conversation_id, created_at DESC)` for
+    newest-first thread paging). Coach_athlete FK is
+    ON DELETE SET NULL — the thread history outlives an
+    ended relationship. `MessagingSchemaIT` (11 tests) guards
+    table/index presence, preview cap, partial-unique edge
+    cases, body CHECK, attachment-id CHECK, composite-PK
+    duplicate-block, and three cascade rules.
+  - **AH-081 DONE** — conversations + messages API. Five
+    routes: inbox list (`GET /api/conversations` with peer +
+    unread count), thread paging (`GET .../messages` newest-
+    first cursor-by-id), send (`POST .../messages`, bumps
+    `last_message_at`/`last_message_preview`, auto-advances
+    the sender's read pointer), mark read
+    (`POST .../read`), and **lazy open-for-relationship**
+    (`POST /api/me/coach-athletes/{id}/conversation` — creates
+    the conversation + both participant rows on first call;
+    same find-or-create pattern as `CoachLinkService.invite`).
+    `MessagingService` enforces the **visibility chokepoint**
+    via `loadVisible(viewerId, conversationId)` — single 404
+    for both "doesn't exist" and "not a participant" so a
+    caller can't enumerate ids. Unread count skips the
+    viewer's own sends (a coach who fires off three messages
+    sees 0 unread, the athlete sees 3). Cursor pagination on
+    the inbox is timestamp-based (`lastMessageAt DESC NULLS
+    LAST` → cursor < lastMessageAt); the assignments-style
+    null-cursor query-split is reused so PG type inference
+    stays happy. `MessagingIT` (12 tests) covers the lazy
+    create, send + denorm bump, visibility 404, validation,
+    unread accounting, read pointer, pagination, and 401-
+    without-token. Full backend suite green (**407 tests, 0
+    failures**).
+  - **AH-082 DONE** — Flutter inbox + chat. **Closes Epic 8.**
+    Two models (`Conversation`, `Message`) mirroring the DTOs,
+    one service (`messaging_api_service.dart`), two screens.
+    `InboxScreen` polls every 8 s and on resume so new
+    messages bubble to the top without manual pull;
+    `ChatScreen` polls every 4 s, reverse-renders the list so
+    newest sits at the bottom, auto-advances the read pointer
+    on mount + on resume, and previews the sender bubble with
+    a primary-tinted bubble for the viewer's own messages.
+    Coach side: a chat icon in the StudentDetail AppBar opens
+    the thread directly via `openForRelationship`. Athlete
+    side: a chat icon on the "Coach: …" card on the profile
+    screen does the same. Also added a "Messages" entry under
+    the COACHING section of the profile screen so both sides
+    have a single entry point. `flutter analyze` clean,
+    `flutter test` 2/2 green.
+  - **EPICS 1–8 FULL.** 47/55 stories closed. Remaining work
+    sits in Epic 9 (notifications + media) and Epic 10
+    (hardening + CI) — both operational, not product-feature.

@@ -37,9 +37,26 @@ linked athletes). Same Flutter app, coach mode.
 
 ## AH-075 — Client: coach screens
 **Acceptance criteria**
-- [ ] `services/api/coaching_api_service.dart` + models.
-- [ ] Screens: students dashboard (summary + filter chips + cards), student detail, assign workout/diet/eval, schedule, library, coach profile.
-- [ ] Role switch toggles the tab set (Students/Schedule/Library/Inbox/Coach).
-- [ ] Plain `setState`; loading/error/empty.
+- [x] `services/api/coach_api_service.dart` + 6 models
+      (`CoachInvite`, `RosterEntry`, `MyCoach`, `StudentDetail`,
+      `Assignment`, `CoachProfile`).
+- [x] Screens: students roster (filterable), student detail
+      (rollups + assignments + Assign sheet), assign workout/diet/eval
+      sheet, pending invites inbox (athlete), my assignments
+      (athlete), coach profile setup, invite-athlete sheet.
+- [x] Coaching hub embedded in the existing profile screen
+      (Option B — single tab tree). Both athlete-side actions
+      (invites, assignments, current coach card) and coach-side
+      actions (athletes roster, coach profile) coexist;
+      role-switching still works server-side, but the UI is
+      shared.
+- [x] Plain `setState`; loading / error / empty states on every
+      screen.
 
-**Technical notes** — Match design `screens-teacher.jsx` + the teacher screens in `app.jsx`.
+**Technical notes** — Backend follow-up: `GET / PUT /api/me/coach-profile`
+with a lazy-default + partial-update pattern (no row written
+until the first PUT). Schedule + Library deferred to a later
+sub-story; for MVP, the Assign sheet lets coaches schedule a
+date + freeform notes — template / plan pickers will arrive
+when authoring screens for `workout_templates` /
+`diet_plans` land.

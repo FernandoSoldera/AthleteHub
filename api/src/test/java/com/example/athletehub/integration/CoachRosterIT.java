@@ -61,6 +61,7 @@ class CoachRosterIT extends AbstractIntegrationTest {
     @BeforeEach
     void setUp() {
         jdbc.update("DELETE FROM coach_athlete");
+        jdbc.update("DELETE FROM coach_profiles");
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
 
@@ -260,6 +261,86 @@ class CoachRosterIT extends AbstractIntegrationTest {
                 "/api/me/coach", HttpMethod.GET,
                 new HttpEntity<>(null, jsonHeaders()), String.class);
         assertThat(response.getStatusCode().value()).isEqualTo(401);
+    }
+
+    // ── coach profile (AH-075) ───────────────────────────────────────────
+
+    @Test
+    void coach_profile_get_returns_zeroed_default_for_first_read() {
+        ResponseEntity<String> response = rest.exchange(
+                "/api/me/coach-profile", HttpMethod.GET,
+                new HttpEntity<>(null, bearer(coachToken)), String.class);
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+
+        JsonNode dto = json(response.getBody());
+        assertThat(dto.get("userId").asLong()).isEqualTo(coachId);
+        assertThat(dto.get("headline").isNull()).isTrue();
+        assertThat(dto.get("yearsExperience").isNull()).isTrue();
+        assertThat(dto.get("athleteCount").asInt()).isZero();
+        assertThat(dto.get("ratingCount").asInt()).isZero();
+
+        // No row was persisted (lazy default).
+        Integer rows = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM coach_profiles WHERE user_id = ?",
+                Integer.class, coachId);
+        assertThat(rows).isZero();
+    }
+
+    @Test
+    void coach_profile_put_upserts_then_get_returns_persisted_row() {
+        ResponseEntity<String> put = rest.exchange(
+                "/api/me/coach-profile", HttpMethod.PUT,
+                new HttpEntity<>(Map.of(
+                        "headline", "Strength + hypertrophy coach",
+                        "yearsExperience", 7), bearer(coachToken)),
+                String.class);
+        assertThat(put.getStatusCode().value()).isEqualTo(200);
+
+        JsonNode dto = json(put.getBody());
+        assertThat(dto.get("headline").asText()).isEqualTo("Strength + hypertrophy coach");
+        assertThat(dto.get("yearsExperience").asInt()).isEqualTo(7);
+
+        JsonNode reread = json(rest.exchange(
+                "/api/me/coach-profile", HttpMethod.GET,
+                new HttpEntity<>(null, bearer(coachToken)), String.class).getBody());
+        assertThat(reread.get("headline").asText()).isEqualTo("Strength + hypertrophy coach");
+    }
+
+    @Test
+    void coach_profile_put_partial_only_touches_provided_fields() {
+        rest.exchange("/api/me/coach-profile", HttpMethod.PUT,
+                new HttpEntity<>(Map.of("headline", "Original", "yearsExperience", 5),
+                        bearer(coachToken)), String.class);
+
+        ResponseEntity<String> put = rest.exchange(
+                "/api/me/coach-profile", HttpMethod.PUT,
+                new HttpEntity<>(Map.of("yearsExperience", 12), bearer(coachToken)),
+                String.class);
+        JsonNode dto = json(put.getBody());
+        assertThat(dto.get("headline").asText()).isEqualTo("Original");
+        assertThat(dto.get("yearsExperience").asInt()).isEqualTo(12);
+    }
+
+    @Test
+    void coach_profile_put_rejects_out_of_range_years() {
+        ResponseEntity<String> response = rest.exchange(
+                "/api/me/coach-profile", HttpMethod.PUT,
+                new HttpEntity<>(Map.of("yearsExperience", 100), bearer(coachToken)),
+                String.class);
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+    }
+
+    @Test
+    void coach_profile_endpoints_without_token_return_401() {
+        ResponseEntity<String> get = rest.exchange(
+                "/api/me/coach-profile", HttpMethod.GET,
+                new HttpEntity<>(null, jsonHeaders()), String.class);
+        assertThat(get.getStatusCode().value()).isEqualTo(401);
+
+        ResponseEntity<String> put = rest.exchange(
+                "/api/me/coach-profile", HttpMethod.PUT,
+                new HttpEntity<>(Map.of("headline", "x"), jsonHeaders()), String.class);
+        assertThat(put.getStatusCode().value()).isEqualTo(401);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────

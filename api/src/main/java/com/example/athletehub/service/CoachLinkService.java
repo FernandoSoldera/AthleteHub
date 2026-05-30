@@ -1,6 +1,7 @@
 package com.example.athletehub.service;
 
 import com.example.athletehub.dto.CoachInviteDto;
+import com.example.athletehub.dto.CoachProfileDto;
 import com.example.athletehub.dto.CreateInviteRequest;
 import com.example.athletehub.dto.CursorPage;
 import com.example.athletehub.dto.EvaluationSummaryDto;
@@ -8,6 +9,7 @@ import com.example.athletehub.dto.MyCoachDto;
 import com.example.athletehub.dto.PublicUserDto;
 import com.example.athletehub.dto.RosterEntryDto;
 import com.example.athletehub.dto.StudentDetailDto;
+import com.example.athletehub.dto.UpdateCoachProfileRequest;
 import com.example.athletehub.dto.WeeklySummaryDto;
 import com.example.athletehub.dto.WorkoutSessionSummaryDto;
 import com.example.athletehub.enums.MessageCode;
@@ -15,8 +17,10 @@ import com.example.athletehub.exception.BadRequestException;
 import com.example.athletehub.exception.ConflictException;
 import com.example.athletehub.exception.ResourceNotFoundException;
 import com.example.athletehub.model.CoachAthlete;
+import com.example.athletehub.model.CoachProfile;
 import com.example.athletehub.model.User;
 import com.example.athletehub.repository.CoachAthleteRepository;
+import com.example.athletehub.repository.CoachProfileRepository;
 import com.example.athletehub.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -55,6 +59,7 @@ import java.util.Set;
 public class CoachLinkService {
 
     private final CoachAthleteRepository coachAthleteRepository;
+    private final CoachProfileRepository coachProfileRepository;
     private final UserRepository userRepository;
     private final TrainingService trainingService;
     private final EvaluationService evaluationService;
@@ -267,5 +272,43 @@ public class CoachLinkService {
         User coach = userRepository.findById(row.getCoachId()).orElse(null);
         User athlete = userRepository.findById(row.getAthleteId()).orElse(null);
         return CoachInviteDto.from(row, coach, athlete);
+    }
+
+    // ── AH-075 coach profile (read + upsert) ──────────────────────────────
+
+    /**
+     * Returns the caller's coach card. Lazy upsert pattern — when the
+     * caller has never edited their card, returns a zeroed default DTO so
+     * the client can render placeholders without a 404.
+     */
+    @Transactional(readOnly = true)
+    public CoachProfileDto getMyCoachProfile(Long userId) {
+        return coachProfileRepository.findById(userId)
+                .map(CoachProfileDto::from)
+                .orElseGet(() -> new CoachProfileDto(userId, null, null, 0, null, 0));
+    }
+
+    /**
+     * Upsert the caller's coach card. Athlete-count + ratings columns are
+     * server-maintained and intentionally not editable through the
+     * payload.
+     */
+    @Transactional
+    public CoachProfileDto upsertMyCoachProfile(Long userId, UpdateCoachProfileRequest request) {
+        CoachProfile row = coachProfileRepository.findById(userId)
+                .orElseGet(() -> CoachProfile.builder()
+                        .userId(userId)
+                        .athleteCount(0)
+                        .ratingCount(0)
+                        .build());
+        if (request.getHeadline() != null) row.setHeadline(trimToNull(request.getHeadline()));
+        if (request.getYearsExperience() != null) row.setYearsExperience(request.getYearsExperience());
+        return CoachProfileDto.from(coachProfileRepository.save(row));
+    }
+
+    private static String trimToNull(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
     }
 }

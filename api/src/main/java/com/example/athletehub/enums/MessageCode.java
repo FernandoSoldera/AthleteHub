@@ -73,5 +73,8 @@ public enum MessageCode {
     INVITE_NOT_PENDING,
 
     // Coaching (EPIC 7 — AH-074)
-    ASSIGNMENT_NOT_FOUND
+    ASSIGNMENT_NOT_FOUND,
+
+    // Messaging (EPIC 8 — AH-081)
+    CONVERSATION_NOT_FOUND
 }

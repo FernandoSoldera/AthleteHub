@@ -9,10 +9,11 @@ import 'placeholder_screen.dart';
 import 'profile_screen.dart';
 import 'train_screen.dart';
 
-/// Athlete app shell with five bottom tabs. Coach mode (a different tab set)
-/// arrives in EPIC 7 (AH-075). Most tabs are still placeholders until their
-/// epic lands — Me uses [ProfileScreen] with the cached user's handle (AH-024),
-/// the Feed AppBar exposes a search action that opens [FindPeopleScreen].
+/// App shell with five bottom tabs. The Me tab uses [ProfileScreen] with the
+/// cached user's handle (AH-024); since AH-075, that profile screen also
+/// exposes the coaching hub (invites, assignments, athletes roster, coach
+/// profile), so coaches don't need a separate tab shell. The Feed AppBar
+/// exposes a search action that opens [FindPeopleScreen].
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 

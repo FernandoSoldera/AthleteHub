@@ -1,11 +1,20 @@
 import 'package:flutter/material.dart';
 
 import '../models/responses/api_error_response.dart';
+import '../models/responses/my_coach.dart';
 import '../models/responses/public_profile_response.dart';
+import '../services/api/coach_api_service.dart';
+import '../services/api/messaging_api_service.dart';
 import '../services/api/social_api_service.dart';
 import '../services/secure_storage_service.dart';
 import '../widgets/avatar.dart';
 import '../widgets/follow_button.dart';
+import 'chat_screen.dart';
+import 'coach_profile_setup_screen.dart';
+import 'inbox_screen.dart';
+import 'my_assignments_screen.dart';
+import 'pending_invites_screen.dart';
+import 'students_screen.dart';
 
 /// Public profile screen — header card with avatar/name/bio, a counters row
 /// (Following / Followers / Sessions), and a follow button. The button is
@@ -25,6 +34,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _errorText;
   PublicProfileResponse? _profile;
   bool _isMe = false;
+  MyCoach? _myCoach;
+  bool _coachLookupTried = false;
 
   @override
   void initState() {
@@ -45,10 +56,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final meFuture = SecureStorageService.getCachedUser();
       final profile = await profileFuture;
       final me = await meFuture;
+      final isMe = me != null && me.handle == widget.handle;
+      MyCoach? myCoach;
+      if (isMe) {
+        try {
+          myCoach = await CoachApiService.myCoach();
+        } catch (_) {
+          // Non-fatal — surface no coaching block if we can't read it.
+        }
+      }
       if (!mounted) return;
       setState(() {
         _profile = profile;
-        _isMe = me != null && me.handle == widget.handle;
+        _isMe = isMe;
+        _myCoach = myCoach;
+        _coachLookupTried = true;
         _loading = false;
       });
     } on ApiException catch (ex) {
@@ -158,9 +180,122 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 },
               ),
             ),
+          if (_isMe && _coachLookupTried) ...[
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 12),
+            _CoachingSection(myCoach: _myCoach, onChanged: _load),
+          ],
         ],
       ),
     );
+  }
+}
+
+/// Coaching hub embedded in the viewer's own profile screen. Surfaces both
+/// athlete-side actions (invites inbox, my assignments, current coach) and
+/// coach-side actions (my athletes, coach profile). Visible only when
+/// looking at one's own profile.
+class _CoachingSection extends StatelessWidget {
+  const _CoachingSection({required this.myCoach, required this.onChanged});
+
+  final MyCoach? myCoach;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('COACHING',
+            style: tt.labelSmall?.copyWith(
+                letterSpacing: 1.2, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 12),
+        if (myCoach != null)
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.sports),
+              title: Text('Coach: ${myCoach!.coach.fullName}'),
+              subtitle: Text('@${myCoach!.coach.handle}'),
+              trailing: IconButton(
+                tooltip: 'Message',
+                icon: const Icon(Icons.chat_bubble_outline),
+                onPressed: () => _openCoachChat(context, myCoach!.id),
+              ),
+            ),
+          ),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.inbox_outlined),
+            title: const Text('Coach invites'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              await Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const PendingInvitesScreen()));
+              onChanged();
+            },
+          ),
+        ),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.assignment_outlined),
+            title: const Text('My assignments'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const MyAssignmentsScreen())),
+          ),
+        ),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.forum_outlined),
+            title: const Text('Messages'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const InboxScreen())),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text('COACH TOOLS',
+            style: tt.labelSmall?.copyWith(
+                letterSpacing: 1.2, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 12),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.groups_outlined),
+            title: const Text('My athletes'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const StudentsScreen())),
+          ),
+        ),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.badge_outlined),
+            title: const Text('Coach profile'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const CoachProfileSetupScreen())),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _openCoachChat(BuildContext context, int relationshipId) async {
+    try {
+      final convo =
+          await MessagingApiService.openForRelationship(relationshipId);
+      if (!context.mounted) return;
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ChatScreen(conversation: convo),
+      ));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Couldn\'t open chat.')),
+      );
+    }
   }
 }
 

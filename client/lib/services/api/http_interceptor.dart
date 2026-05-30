@@ -41,6 +41,10 @@ class HttpInterceptor {
           {Map<String, String>? headers, Object? body}) =>
       _send('PATCH', path, headers: headers, body: body);
 
+  static Future<http.Response> put(String path,
+          {Map<String, String>? headers, Object? body}) =>
+      _send('PUT', path, headers: headers, body: body);
+
   static Future<http.Response> delete(String path,
           {Map<String, String>? headers}) =>
       _send('DELETE', path, headers: headers);
@@ -98,6 +102,8 @@ class HttpInterceptor {
         return http.post(url, headers: headers, body: encoded);
       case 'PATCH':
         return http.patch(url, headers: headers, body: encoded);
+      case 'PUT':
+        return http.put(url, headers: headers, body: encoded);
       case 'DELETE':
         return http.delete(url, headers: headers);
       default:
