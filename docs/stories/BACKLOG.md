@@ -110,7 +110,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 |----|-------|--------|-----------|
 | AH-070 | Schema: coach_athlete, assignments, eval_requests, coach_profiles | DONE | AH-010 |
 | AH-071 | Coach↔athlete invite + consent linking | DONE | AH-070, AH-016 |
-| AH-072 | Roster + adherence/flags + overview tiles | TODO | AH-071, AH-033 |
+| AH-072 | Roster + adherence/flags + overview tiles | DONE | AH-071, AH-033 |
 | AH-073 | Student detail aggregate | TODO | AH-072, AH-042 |
 | AH-074 | Assign workout/diet/eval + schedule + library | TODO | AH-073, AH-030, AH-050 |
 | AH-075 | Client: Students, Student detail, Assign, Schedule, Library, Coach profile | TODO | AH-074, AH-017 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 40 done / 47. **Epics 1–6 fully closed; Epic 7 (Coaching) 2/6 — schema + invite/consent linking.**
+**Progress:** 41 done / 47. **Epics 1–6 fully closed; Epic 7 (Coaching) 3/6 — schema + invite + roster.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1832,11 +1832,66 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     AH-072 or its own small follow-up). The coach card on the
     profile screen would just show defaults until then; not
     blocking the AH-071 flow.
-  - **Next:** **AH-072 — roster + adherence/flags + overview
-    tiles**: `GET /api/coach/athletes?flag=...` (coach's active
-    roster, filtered by flag; covered by the
-    `idx_coach_athlete_coach_flag` index from AH-070), one tile
-    per athlete with latest activity / adherence / flag.
-    Adherence + flag are still nullable until the recompute job
-    (Epic 9) populates them — for MVP AH-072 surfaces them as
-    null and the client renders "new" / "—" placeholders.
+  - **AH-072 DONE** — coach roster + athlete-side "who is my
+    coach?". Two read endpoints (no writes):
+      * **`GET /api/coach/athletes?status=&flag=&cursor=&limit=`**
+        — coach's roster, cursor-paginated. Defaults to
+        `status = "active"`; coach can override with `pending`
+        (outgoing-invite list — finally lets the coach see who
+        hasn't responded) or `ended` (past athletes). Optional
+        `flag` filter (`on_track | attention | risk`). Backed by
+        the `idx_coach_athlete_coach_flag` covered index from
+        AH-070. Returns `CursorPage<RosterEntryDto>` with the
+        athlete hydrated in one batched read per page.
+      * **`GET /api/me/coach`** — athlete's active coach
+        relationship, hydrated with the coach side. Returns a
+        single `MyCoachDto` or null when no active coach. 1:1
+        per the MVP architecture spec (§4.8 `conversations`
+        comment); the repo method
+        `findFirstByAthleteIdAndStatus` is named for the
+        possibility of relaxing that constraint later.
+    **Forgiving filter parsing** — unknown `status` falls back to
+    `"active"`; unknown `flag` silently drops to "no flag
+    filter". Same pattern as the feed type filter (AH-062). A
+    stale client that sends a value we removed doesn't get a
+    400; it just gets a sensible default.
+    Files added
+      * `dto/{RosterEntryDto, MyCoachDto}` — both records that
+        carry the relationship stats + the other-side hydrated
+        user. Distinct from `CoachInviteDto` (which has both
+        sides) so the roster view doesn't leak the coach's own
+        DTO back at them on every row.
+      * `controller/CoachRosterController` — the two routes.
+      * test: `CoachRosterIT` (15 cases)
+    Files modified
+      * `repository/CoachAthleteRepository` + `findRoster`
+        (JPQL with optional `flag` via `:flag IS NULL OR …`,
+        cursor on `id < :cursor`) + `findFirstByAthleteIdAndStatus`
+      * `service/CoachLinkService` + `listRoster`, `getMyCoach`,
+        `ROSTER_STATUSES` + `ROSTER_FLAGS` whitelists for the
+        forgiving-filter coercion.
+    `CoachRosterIT` 15/15 (23 s):
+      * **roster** — empty when no athletes; returns active
+        athletes only (excludes pending + ended) with athlete
+        hydrated; no leakage between coaches; flag filter
+        narrows to the matching subset; unknown flag silently
+        drops to unfiltered; status override surfaces pending
+        outgoing-invite list + ended past athletes; unknown
+        status falls back to active; cursor pagination on id
+        DESC; null flag + adherence pass through verbatim
+        (placeholders are the client's job); no token → 401.
+      * **my coach** — null when no active relationship;
+        returns the active row with coach hydrated; excludes
+        pending + ended (an athlete with a pending invite from
+        coach A and an ended past coach B still gets null); no
+        cross-athlete leakage; no token → 401.
+    Full backend suite: **345/345** (30 ITs + 3 unit).
+  - **Next:** **AH-073 — student detail aggregate**:
+    `GET /api/coach/athletes/{id:\\d+}` — coach view of one
+    student. Hydrates the relationship row + the athlete's
+    recent training (sessions + cardio summary, AH-035 reuse) +
+    their latest evaluation (AH-042 reuse) + assignment status.
+    The aggregate is the "Student detail" screen — coach's
+    deep-dive view of one athlete. Visibility gate must verify
+    the caller is the coach on an active relationship; 404
+    otherwise.

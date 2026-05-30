@@ -2,6 +2,9 @@ package com.example.athletehub.service;
 
 import com.example.athletehub.dto.CoachInviteDto;
 import com.example.athletehub.dto.CreateInviteRequest;
+import com.example.athletehub.dto.CursorPage;
+import com.example.athletehub.dto.MyCoachDto;
+import com.example.athletehub.dto.RosterEntryDto;
 import com.example.athletehub.enums.MessageCode;
 import com.example.athletehub.exception.BadRequestException;
 import com.example.athletehub.exception.ConflictException;
@@ -11,6 +14,7 @@ import com.example.athletehub.model.User;
 import com.example.athletehub.repository.CoachAthleteRepository;
 import com.example.athletehub.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,9 +22,11 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * AH-071 — coach↔athlete invite + consent linking. Four flows:
@@ -128,6 +134,68 @@ public class CoachLinkService {
         CoachAthlete row = loadInviteFor(athleteId, inviteId);
         row.setStatus("ended");
         return hydrate(coachAthleteRepository.save(row));
+    }
+
+    // ── AH-072 roster + my-coach ──────────────────────────────────────────
+
+    /** Allowed status values for the roster filter. Defaults to "active". */
+    private static final Set<String> ROSTER_STATUSES =
+            Set.of("pending", "active", "ended");
+
+    /** Allowed flag values per the schema CHECK. */
+    private static final Set<String> ROSTER_FLAGS =
+            Set.of("on_track", "attention", "risk");
+
+    /**
+     * Coach roster, cursor-paginated. Filters silently coerce out-of-set
+     * values to defaults — same forgiving pattern as the feed type filter
+     * (AH-062). The hydration pass batches the athlete loads in one
+     * round-trip.
+     */
+    @Transactional(readOnly = true)
+    public CursorPage<RosterEntryDto> listRoster(Long coachId, String statusParam,
+                                                 String flagParam, Long cursor, int limit) {
+        String status = (statusParam != null && ROSTER_STATUSES.contains(statusParam))
+                ? statusParam : "active";
+        String flag = (flagParam != null && ROSTER_FLAGS.contains(flagParam))
+                ? flagParam : null;
+
+        List<CoachAthlete> rows = coachAthleteRepository.findRoster(
+                coachId, status, flag, cursor, PageRequest.of(0, limit + 1));
+        if (rows.isEmpty()) return CursorPage.of(List.of(), null);
+
+        boolean hasMore = rows.size() > limit;
+        List<CoachAthlete> visible = hasMore ? rows.subList(0, limit) : rows;
+
+        // Batch-load athletes.
+        Set<Long> athleteIds = new HashSet<>();
+        for (CoachAthlete r : visible) athleteIds.add(r.getAthleteId());
+        Map<Long, User> athletesById = new HashMap<>();
+        userRepository.findAllById(athleteIds).forEach(u -> athletesById.put(u.getId(), u));
+
+        List<RosterEntryDto> items = new ArrayList<>(visible.size());
+        for (CoachAthlete r : visible) {
+            items.add(RosterEntryDto.from(r, athletesById.get(r.getAthleteId())));
+        }
+        String nextCursor = hasMore
+                ? String.valueOf(visible.get(visible.size() - 1).getId())
+                : null;
+        return CursorPage.of(items, nextCursor);
+    }
+
+    /**
+     * Athlete-side: the caller's active coach relationship, hydrated.
+     * Returns null when the athlete has no active coach.
+     */
+    @Transactional(readOnly = true)
+    public MyCoachDto getMyCoach(Long athleteId) {
+        return coachAthleteRepository
+                .findFirstByAthleteIdAndStatus(athleteId, "active")
+                .map(row -> {
+                    User coach = userRepository.findById(row.getCoachId()).orElse(null);
+                    return MyCoachDto.from(row, coach);
+                })
+                .orElse(null);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────
