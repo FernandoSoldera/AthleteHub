@@ -33,6 +33,7 @@ import java.util.List;
 public class CardioService {
 
     private final CardioActivityRepository cardioRepository;
+    private final PostService postService;
 
     @Transactional
     public CardioActivityDto create(Long userId, CreateCardioRequest request) {
@@ -51,6 +52,13 @@ public class CardioService {
                 .startedAt(request.getStartedAt())  // null → @PrePersist defaults to now()
                 .source("self")
                 .build());
+        // Auto-publish a feed card. Wrapped so a snapshot failure can't
+        // roll back the cardio row the user just logged.
+        try {
+            postService.publishFromCardio(saved);
+        } catch (RuntimeException ignored) {
+            // Intentional: the originating transaction wins.
+        }
         return CardioActivityDto.from(saved);
     }
 

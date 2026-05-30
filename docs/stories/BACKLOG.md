@@ -100,7 +100,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
 | AH-060 | Schema: posts, post_likes, post_comments | DONE | AH-010 |
-| AH-061 | Auto-create posts from workout/cardio/eval + manual posts | TODO | AH-060, AH-033 |
+| AH-061 | Auto-create posts from workout/cardio/eval + manual posts | DONE | AH-060, AH-033 |
 | AH-062 | Feed timeline (fan-out-on-read) + filters + hydration | TODO | AH-061, AH-021 |
 | AH-063 | Like, comment, share | TODO | AH-062 |
 | AH-064 | Client: Feed screen + card, like/comment + service | TODO | AH-063, AH-017 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 34 done / 47. **Epics 1–5 fully closed; Epic 6 (Feed) opened with AH-060 schema.**
+**Progress:** 35 done / 47. **Epics 1–5 fully closed; Epic 6 (Feed) 2/5 — schema + auto-post + manual post / delete.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1376,10 +1376,83 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
     their likes + their comments cascade (other users' posts
     survive).
     Full backend suite: **240/240** (24 ITs + 3 unit).
-  - **Next:** **AH-061 — auto-create posts from workout/cardio/eval +
-    manual posts**: hook into `finishSession` (AH-033),
-    `cardio.create` (AH-034), `evaluation.create` (AH-041) so
-    each emits a post with the JSONB snapshot; add `POST /api/posts`
-    for the manual case. Probably introduces a `PostService` that
-    handles the snapshot serialization and the cascade ordering
-    (user → counter increment via `user_counters.posts`).
+  - **AH-061 DONE** — auto-create posts + manual posts.
+    New `PostService` exposes four publish entry points: three
+    internal hooks (`publishFromWorkout`, `publishFromCardio`,
+    `publishFromEvaluation`) called from the originating service +
+    one public manual publish (`publishManual`). Each call: builds
+    the JSONB `payload` snapshot, sets the soft link
+    (`source_ref_type` + `source_ref_id`) per the data-model spec,
+    stamps the `type` enum value, saves the row, bumps
+    `user_counters.posts` (+1 via new `adjustPosts`).
+    JSONB mapping uses Hibernate's `@JdbcTypeCode(SqlTypes.JSON)`
+    on a `Map<String, Object>` field — Hibernate handles Jackson
+    serialization on read/write, no custom converter needed.
+    Hook-point integration in the existing services
+      * **`TrainingService.finishSession`** — after the rollups +
+        PR pass + counter increment, calls
+        `postService.publishFromWorkout(session)`. Snapshot fields:
+        `title, totalVolumeKg, totalSets, prCount, durationSeconds`.
+      * **`CardioService.create`** — after the row save, calls
+        `postService.publishFromCardio(activity)`. Snapshot fields:
+        `type, distanceM, durationSeconds, avgPaceSPerKm?,
+        avgHr?, kcal?`. Cardio type → post type:
+        `cycle → cycle`, `walk → run`, `run → run` (the design's
+        post-type enum doesn't distinguish walk; walks render the
+        same card as runs).
+      * **`EvaluationService.create`** — after the row + measurements
+        save, calls `postService.publishFromEvaluation(saved)`.
+        Snapshot fields: `weightKg, bodyFatPct?, bfMethod?,
+        evaluatedAt`.
+    **Sharp edge encoded** — every hook call is wrapped in
+    try/catch (`RuntimeException` → log + continue). A snapshot
+    failure can't roll back the originating transaction; a workout
+    that finished should stay finished even if the feed card
+    couldn't be persisted. The user can manually re-post if needed.
+    Endpoints
+      * **`POST /api/posts`** — body `{title?, note?, visibility?}`
+        for manual posts. Type is always `manual`. Visibility
+        defaults to `followers`; bean validation enforces the
+        whitelist (`public | followers | private`).
+      * **`DELETE /api/posts/{id:\\d+}`** — soft-delete: stamps
+        `deleted_at = now()` on the row + decrements counter by 1.
+        Author-scoped — 404 `POST_NOT_FOUND` on someone else's or
+        already-deleted (no disclosure between "doesn't exist"
+        and "not yours" by timing).
+    Files added
+      * `model/Post` (JSONB payload via `@JdbcTypeCode`)
+      * `repository/PostRepository`
+      * `dto/{PostDto, CreateManualPostRequest}`
+      * `service/PostService`
+      * `controller/PostController`
+      * `enums/MessageCode` + `POST_NOT_FOUND`
+      * test: `PostsIT` (14 cases)
+    Files modified
+      * `repository/UserCountersRepository` + `adjustPosts`
+      * `service/TrainingService` + `PostService` dep + try/catch
+        publish call in `finishSession`
+      * `service/CardioService` + `PostService` dep + try/catch
+        publish call in `create`
+      * `service/EvaluationService` + `PostService` dep + try/catch
+        publish call in `create`
+    `PostsIT` 14/14 (4 s): manual post returns 201 with defaults
+    (type=manual, visibility=followers, source-ref nulled,
+    counters zeroed); visibility override accepts all three; bad
+    visibility → 400 VALIDATION_FAILED; no token → 401; counter
+    increments on each manual post; soft-delete stamps deleted_at
+    + decrements counter; delete twice → 404 POST_NOT_FOUND;
+    delete another user's post → 404 + post untouched; delete
+    unknown → 404; finish workout → workout post with
+    source_ref_type=workout_session + correct ref id + counter
+    bumped; create run cardio → run post; create cycle cardio →
+    cycle post; create walk cardio → run post (walk maps to run);
+    create evaluation → evolution post with
+    source_ref_type=evaluation + correct ref id.
+    Full backend suite: **254/254** (25 ITs + 3 unit).
+  - **Next:** **AH-062 — feed timeline + filters + hydration**:
+    `GET /api/feed?cursor=&filters=...` (home feed, fan-out-on-
+    read scanning the partial `idx_posts_feed_created_active`
+    index restricted to followees + self for `visibility =
+    followers`, all of `visibility = public`), `GET /api/users/{handle}/posts`
+    (profile feed). Hydrate author + counters + viewer's
+    `iLiked` flag in one batched read per page.

@@ -59,6 +59,7 @@ public class EvaluationService {
     private final EvaluationRepository evaluationRepository;
     private final EvaluationMeasurementRepository measurementRepository;
     private final UserRepository userRepository;
+    private final PostService postService;
     private final Clock clock;
 
     // ── create ───────────────────────────────────────────────────────────
@@ -114,6 +115,15 @@ public class EvaluationService {
                 .sorted((a, b) -> a.getPointId().compareTo(b.getPointId()))
                 .map(EvaluationMeasurementDto::from)
                 .toList();
+
+        // Auto-publish a feed card. Wrapped so a snapshot failure can't
+        // roll back the evaluation row the user just logged.
+        try {
+            postService.publishFromEvaluation(saved);
+        } catch (RuntimeException ignored) {
+            // Intentional: the originating transaction wins.
+        }
+
         return EvaluationDto.from(saved, measurementDtos);
     }
 

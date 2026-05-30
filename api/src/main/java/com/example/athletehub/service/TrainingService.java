@@ -87,6 +87,7 @@ public class TrainingService {
     private final ExerciseRepository exerciseRepository;
     private final CardioActivityRepository cardioRepository;
     private final UserCountersRepository userCountersRepository;
+    private final PostService postService;
     private final Clock clock;
 
     // ── AH-032 — today's plan ─────────────────────────────────────────────
@@ -343,6 +344,16 @@ public class TrainingService {
         sessionRepository.save(session);
 
         userCountersRepository.adjustSessions(userId, 1);
+
+        // Auto-publish a feed card for the finished workout. Wrapped in
+        // try/catch so a snapshot failure doesn't roll back the session
+        // we just finished — a workout that finished should stay
+        // finished even if its post couldn't be persisted.
+        try {
+            postService.publishFromWorkout(session);
+        } catch (RuntimeException ignored) {
+            // Intentional: the originating transaction wins.
+        }
 
         return hydrateSession(session, sessionExercises);
     }

@@ -59,5 +59,8 @@ public enum MessageCode {
 
     // Nutrition (EPIC 5 — AH-053)
     FOOD_NOT_FOUND,
-    DIARY_ENTRY_NOT_FOUND
+    DIARY_ENTRY_NOT_FOUND,
+
+    // Feed (EPIC 6 — AH-061)
+    POST_NOT_FOUND
 }

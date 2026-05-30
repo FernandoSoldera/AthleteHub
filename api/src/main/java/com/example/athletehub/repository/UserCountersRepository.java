@@ -19,4 +19,8 @@ public interface UserCountersRepository extends JpaRepository<UserCounters, Long
     @Modifying
     @Query("UPDATE UserCounters c SET c.sessions = c.sessions + :delta WHERE c.userId = :userId")
     int adjustSessions(@Param("userId") Long userId, @Param("delta") int delta);
+
+    @Modifying
+    @Query("UPDATE UserCounters c SET c.posts = c.posts + :delta WHERE c.userId = :userId")
+    int adjustPosts(@Param("userId") Long userId, @Param("delta") int delta);
 }
