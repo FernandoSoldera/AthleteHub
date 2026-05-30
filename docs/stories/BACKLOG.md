@@ -108,7 +108,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 ### EPIC 7 — Coaching · [epic-7-coaching.md](epic-7-coaching.md)
 | ID | Story | Status | Depends on |
 |----|-------|--------|-----------|
-| AH-070 | Schema: coach_athlete, assignments, eval_requests, coach_profiles | TODO | AH-010 |
+| AH-070 | Schema: coach_athlete, assignments, eval_requests, coach_profiles | DONE | AH-010 |
 | AH-071 | Coach↔athlete invite + consent linking | TODO | AH-070, AH-016 |
 | AH-072 | Roster + adherence/flags + overview tiles | TODO | AH-071, AH-033 |
 | AH-073 | Student detail aggregate | TODO | AH-072, AH-042 |
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 38 done / 47. **Epics 1–6 all fully closed. Epic 7 (Coaching) is next.**
+**Progress:** 39 done / 47. **Epics 1–6 fully closed; Epic 7 (Coaching) opened with AH-070 schema.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1674,12 +1674,98 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
         accepts an empty payload (kept loose for future
         image-only posts in Epic 9) but the client's UX layer
         nudges toward content.
-  - **Next:** **Epic 7 (Coaching)** opens with **AH-070**:
-    schema for `coach_athlete` (the consent link), `assignments`
-    (workout/cardio/diet/eval tasks for an athlete), `eval_requests`
-    (coach asks for an evaluation), and `coach_profiles`
-    (bio / specialties / pricing — public-facing card data).
-    First time we land the `assignments` FK targets that AH-030,
-    AH-034, AH-041, AH-050 reserved enum values for; this is
-    where the `source = 'coach'` / `source = 'assigned'` paths
-    get hooked up to a real reference.
+  - **AH-070 DONE** — Coaching foundation. Flyway migration
+    `V20260530120000__create_coaching_tables.sql` creates the
+    4 coaching tables per `02-data-model.md §4.7` AND wires up
+    the FK columns that AH-030 / AH-034 / AH-041 reserved enum
+    values for. Three tables earlier epics committed to extending
+    here:
+      * `workout_sessions` + `assignment_id` FK (was promised
+        when AH-030 accepted `source = 'assigned'`)
+      * `cardio_activities` + `assignment_id` FK (same promise
+        from AH-034)
+      * `evaluations` + `eval_request_id` FK (the AH-041
+        `source = 'coach'` path's matching reference)
+    All three use `ON DELETE SET NULL` so a coach unassigning a
+    task doesn't blow away the athlete's already-completed
+    session / activity / evaluation row — the link simply goes
+    orphan. Each FK column gets its own partial index
+    (`WHERE assignment_id IS NOT NULL` etc.) since the typical
+    row has no assignment.
+    New tables
+      * **`coach_athlete`** — the consent edge. `status ∈
+        {pending, active, ended}` (pending → active on AH-071
+        consent; active → ended on either side cancelling).
+        `flag ∈ {on_track, attention, risk}` + `adherence_pct ∈
+        [0, 100]` are nullable until Epic 9's recompute job
+        populates them. `UNIQUE(coach_id, athlete_id)` — one
+        relationship per pair. `CHECK (coach_id <> athlete_id)`
+        so you can't coach yourself even with both COACH +
+        ATHLETE roles. Indexes:
+        `idx_coach_athlete_coach_flag (coach_id, flag)` for the
+        dashboard, `idx_coach_athlete_athlete` for "who is my
+        coach?".
+      * **`assignments`** — coach-prescribed task.
+        `type ∈ {workout, diet, eval}`. `ref_type` + `ref_id`
+        are a soft link to the underlying asset (template / plan
+        / eval_request) — no FK because deleting a template
+        shouldn't cascade-delete every assignment that ever
+        referenced it; soft link goes stale. Same XOR pattern as
+        posts' `source_ref` (AH-060): both null (a "free"
+        assignment with just notes) or both set.
+        `status ∈ {scheduled, today, pending, done, skipped}`.
+        `idx_assignments_relationship_date (coach_athlete_id,
+        scheduled_for)` for the dashboard's "today's tasks".
+      * **`eval_requests`** — "coach asks athlete for a
+        measurement on date X". Distinct from `evaluations`
+        themselves; the athlete files the actual eval (which
+        can reference this request via the new
+        `evaluations.eval_request_id`). `requested_points`
+        JSONB carries the list of circumferences / skinfolds
+        the coach wants captured. `status ∈ {scheduled,
+        completed, missed}`. `idx_eval_requests_relationship_scheduled`.
+      * **`coach_profiles`** — coach-specific public card data.
+        `user_id` is the PK so it's a strict 1:1 with users.
+        Carries `headline`, `years_experience`, `athlete_count`,
+        `rating_avg`/`rating_count`. Rating columns ship now
+        (zero-defaulted) so the coach card doesn't need a
+        schema change when a rating feature lands. Range CHECKs:
+        `rating_avg ∈ [0, 5]`, all counts non-negative.
+    Cascade choices
+      * **delete user (coach OR athlete)** → CASCADE to
+        `coach_athlete`, then through the relationship-CASCADE
+        chain to `assignments` + `eval_requests`. Coach delete
+        also cascades to their `coach_profiles` row.
+      * **delete coach_athlete** → CASCADE to its `assignments`
+        + `eval_requests`.
+      * **delete assignment** → SET NULL on
+        `workout_sessions.assignment_id` +
+        `cardio_activities.assignment_id` (the historical session
+        / activity rows survive without the link).
+      * **delete eval_request** → SET NULL on
+        `evaluations.eval_request_id` (the evaluation survives).
+    `CoachingSchemaIT` 16/16 (110 ms): tables + 7 indexes
+    present, ALTER columns landed on workout_sessions /
+    cardio_activities / evaluations, coach_athlete status enum
+    enforced + all 3 valid values accepted, can't-coach-yourself
+    enforced, UNIQUE(coach,athlete) enforced, flag + adherence
+    range CHECKs fire + all valid flag values land, assignments
+    type + status enums enforced, ref XOR fires in both
+    directions + both legal shapes succeed, eval_requests
+    status enum enforced, coach_profiles rating in [0, 5]
+    (including boundary values), delete coach_athlete →
+    assignments + eval_requests cascade, delete coach user →
+    relationship + coach_profile gone, delete assignment nulls
+    workout_sessions + cardio_activities pointers, delete
+    eval_request nulls evaluations pointer.
+    Full backend suite: **310/310** (28 ITs + 3 unit).
+  - **Next:** **AH-071 — coach↔athlete invite + consent linking**:
+    `POST /api/coach/invites` (coach invites an athlete by handle
+    → creates a `pending` coach_athlete row), `GET /api/me/coach-invites`
+    (athlete's pending invites), `POST /api/me/coach-invites/{id}/accept`
+    (flips status to active + sets `since` date) and `/decline`
+    (status to ended). Should reject double-invites (the UNIQUE
+    constraint handles half of it; service must short-circuit on
+    an existing pending/active row with a friendly code).
+    Probably also creates the `coach_profiles` row on first
+    activation if missing.
