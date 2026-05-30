@@ -3,6 +3,7 @@ package com.example.athletehub.repository;
 import com.example.athletehub.model.Post;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -10,6 +11,20 @@ import java.util.Collection;
 import java.util.List;
 
 public interface PostRepository extends JpaRepository<Post, Long> {
+
+    // ── counter maintenance (AH-063) ──────────────────────────────────────
+
+    /** Move {@code like_count} by {@code delta}. Schema CHECK keeps the
+     *  value non-negative; callers only decrement when a row actually
+     *  existed, so the constraint never fires in normal use. */
+    @Modifying
+    @Query("UPDATE Post p SET p.likeCount = p.likeCount + :delta WHERE p.id = :postId")
+    int adjustLikeCount(@Param("postId") Long postId, @Param("delta") int delta);
+
+    /** Same shape, for the {@code comment_count} column. */
+    @Modifying
+    @Query("UPDATE Post p SET p.commentCount = p.commentCount + :delta WHERE p.id = :postId")
+    int adjustCommentCount(@Param("postId") Long postId, @Param("delta") int delta);
 
     // ── home feed (AH-062) ────────────────────────────────────────────────
 

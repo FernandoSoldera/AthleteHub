@@ -102,7 +102,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 | AH-060 | Schema: posts, post_likes, post_comments | DONE | AH-010 |
 | AH-061 | Auto-create posts from workout/cardio/eval + manual posts | DONE | AH-060, AH-033 |
 | AH-062 | Feed timeline (fan-out-on-read) + filters + hydration | DONE | AH-061, AH-021 |
-| AH-063 | Like, comment, share | TODO | AH-062 |
+| AH-063 | Like, comment, share | DONE | AH-062 |
 | AH-064 | Client: Feed screen + card, like/comment + service | TODO | AH-063, AH-017 |
 
 ### EPIC 7 — Coaching · [epic-7-coaching.md](epic-7-coaching.md)
@@ -140,7 +140,7 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
 
 ---
 
-**Progress:** 36 done / 47. **Epics 1–5 fully closed; Epic 6 (Feed) 3/5 — schema + auto-post + feed timeline + profile feed.**
+**Progress:** 37 done / 47. **Epics 1–5 fully closed; Epic 6 backend done (4/5) — only AH-064 (Flutter client) remains to close the epic.**
 
 ### Session log
 - **2026-05-27** — Epic 0 substantially complete.
@@ -1514,13 +1514,94 @@ EPIC 10 Hardening & release    ──── ongoing / before launch
         handle → 404, no token → 401 (both endpoints), cursor
         pagination walks pages.
     Full backend suite: **271/271** (26 ITs + 3 unit).
-  - **Next:** **AH-063 — like / comment / share**:
-    `POST /api/posts/{id}/likes` + `DELETE /api/posts/{id}/likes`
-    (idempotent — second tap is a no-op like favorites);
-    `POST /api/posts/{id}/comments` + `DELETE
-    /api/comments/{id}` (author-scoped soft-delete);
-    `GET /api/posts/{id}/comments?cursor=` (chronological thread);
-    counter maintenance on `posts.like_count` + `comment_count`.
-    Share is a client-side concern (`Share.share()` in Flutter,
-    not a backend endpoint) so AH-063 backend lands only the
-    first four.
+  - **AH-063 DONE** — likes + comments. **Closes the backend half
+    of Epic 6.** Five new endpoints + the counter maintenance:
+      * **`POST /api/posts/{id:\\d+}/likes`** — 204. Idempotent
+        find-or-insert; the like row + `posts.like_count++` only
+        fire on the first call. Subsequent taps are no-ops at the
+        data layer.
+      * **`DELETE /api/posts/{id:\\d+}/likes`** — 204. Idempotent;
+        the delete + `posts.like_count--` only fire when a row
+        actually existed (schema's `like_count >= 0` CHECK never
+        trips). Doesn't re-check visibility — a user who liked
+        a public post then had the author flip it to private
+        should still be able to unlike.
+      * **`POST /api/posts/{id:\\d+}/comments`** — body `{body}`.
+        Returns 201 + hydrated `CommentDto` (author surfaced)
+        so the client renders the new card without a follow-up
+        call. Bumps `posts.comment_count`. Body is trimmed +
+        bean-validated (`@NotBlank`, max 2000 chars).
+      * **`DELETE /api/comments/{id:\\d+}`** — 204. Author-scoped
+        soft-delete (stamps `deleted_at = now()`) + decrements
+        the post's comment counter. The row stays for moderation
+        audit. Lives on its own controller / route so the
+        comment-id namespace doesn't collide with the post-id one.
+      * **`GET /api/posts/{id:\\d+}/comments?cursor=&limit=`** —
+        chronological thread (oldest first, soft-deleted excluded).
+        Cursor on `id ASC, id > beforeId`. Author hydrated in one
+        batched read per page.
+    **Visibility chokepoint** lives in `PostService.loadVisible(viewerId,
+    postId)` — the single decision point used by every AH-063
+    interaction endpoint (and the thread read). Rule:
+      * own posts: always
+      * `public`: anyone
+      * `followers`: only when the viewer follows the author
+      * `private`: author only
+    "Doesn't exist" and "not allowed to see" both return
+    `POST_NOT_FOUND` — no existence-vs-permission timing side
+    channel. Any future "friends-only" tier lands in this one
+    method.
+    Files added
+      * `model/PostComment`
+      * `repository/PostCommentRepository` + `findThread` (cursor
+        + soft-delete filter + chronological order)
+      * `dto/{CreateCommentRequest, CommentDto}`
+      * `service/InteractionService` — like / unlike / addComment
+        / deleteComment / listComments
+      * `controller/CommentController` — comment-scoped delete
+      * `enums/MessageCode` + `COMMENT_NOT_FOUND`
+      * test: `LikesAndCommentsIT` (23 cases)
+    Files modified
+      * `repository/PostRepository` + `adjustLikeCount`,
+        `adjustCommentCount` — `@Modifying` counter writes
+      * `service/PostService` + `loadVisible` (chokepoint) +
+        `canView` (rule encoded) + `FollowRepository` dep
+      * `controller/PostController` — like + comment-add /
+        comment-list endpoints (delete-comment lives on
+        `CommentController`)
+    `LikesAndCommentsIT` 23/23 (21 s):
+      * **Likes happy path + counter** — like inserts row +
+        bumps counter; idempotent (no extra row / counter on
+        second tap); unlike removes row + decrements; unlike
+        idempotent on miss (no decrement, no error); unlike
+        still works after visibility flipped to private.
+      * **Likes visibility matrix** — followers post by follower
+        ok; by stranger → 404; private post by non-author → 404;
+        own private post ok; soft-deleted post → 404; unknown
+        post → 404; no token → 401.
+      * **Comments happy path + counter** — add returns 201 with
+        hydrated author + bumps counter; rejects empty body → 400;
+        visibility gate fires on add (stranger → 404); delete soft-
+        deletes + decrements + leaves row in DB; delete twice →
+        404 COMMENT_NOT_FOUND; delete by non-author → 404; list
+        returns chronological with authors hydrated; list excludes
+        soft-deleted; list respects visibility gate (stranger →
+        404); list paginates with cursor; all comment endpoints
+        → 401 without token.
+    Share is intentionally **client-side only** — `Share.share()`
+    in Flutter copies the post's deep link to the OS share sheet.
+    No backend endpoint needed (would add nothing analytics-wise
+    that we couldn't derive from the link visit later).
+    Full backend suite: **294/294** (27 ITs + 3 unit).
+  - **Next:** **AH-064 — Flutter client: Feed screen + card,
+    like/comment + service.** Closes Epic 6. Models mirror the
+    backend DTOs (`Post`, `FeedItem`, `Comment`, requests); a
+    `feed_api_service.dart` covers the 7 endpoints (home + profile
+    feed, manual post + delete, like + unlike, comments
+    list/add/delete); `screens/feed_screen.dart` renders the
+    home tab with a card-per-post layout (type-specific snapshot
+    rendering from `payload`, like + comment counters with
+    optimistic flip, share button via Flutter's `share_plus`);
+    `screens/comment_thread_screen.dart` opens on tap → shows
+    the thread + compose. Replaces the Feed tab placeholder in
+    main_shell.

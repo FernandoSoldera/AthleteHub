@@ -62,5 +62,8 @@ public enum MessageCode {
     DIARY_ENTRY_NOT_FOUND,
 
     // Feed (EPIC 6 — AH-061)
-    POST_NOT_FOUND
+    POST_NOT_FOUND,
+
+    // Feed (EPIC 6 — AH-063)
+    COMMENT_NOT_FOUND
 }

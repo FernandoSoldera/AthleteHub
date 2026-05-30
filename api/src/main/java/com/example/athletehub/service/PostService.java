@@ -8,6 +8,7 @@ import com.example.athletehub.model.CardioActivity;
 import com.example.athletehub.model.Evaluation;
 import com.example.athletehub.model.Post;
 import com.example.athletehub.model.WorkoutSession;
+import com.example.athletehub.repository.FollowRepository;
 import com.example.athletehub.repository.PostRepository;
 import com.example.athletehub.repository.UserCountersRepository;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,7 @@ public class PostService {
 
     private final PostRepository postRepository;
     private final UserCountersRepository userCountersRepository;
+    private final FollowRepository followRepository;
 
     // ── auto-publish from training (AH-033 finishSession) ─────────────────
 
@@ -166,6 +168,45 @@ public class PostService {
         post.setDeletedAt(OffsetDateTime.now());
         postRepository.save(post);
         userCountersRepository.adjustPosts(userId, -1);
+    }
+
+    // ── visibility chokepoint (AH-063) ────────────────────────────────────
+
+    /**
+     * Loads an active (not soft-deleted) post the viewer is allowed to
+     * see, or throws {@code POST_NOT_FOUND}. Used by the
+     * like / comment / list-comments paths so visibility logic doesn't
+     * fork across endpoints.
+     *
+     * <p>Visibility rule:
+     * <ul>
+     *   <li>own posts: always</li>
+     *   <li>{@code public}: anyone</li>
+     *   <li>{@code followers}: only if the viewer follows the author</li>
+     *   <li>{@code private}: author only (same as own)</li>
+     * </ul>
+     *
+     * <p>"Doesn't exist" and "not allowed to see" return the same code so
+     * we don't leak existence by timing or status.
+     */
+    @Transactional(readOnly = true)
+    public Post loadVisible(Long viewerId, Long postId) {
+        Post post = postRepository.findById(postId)
+                .filter(p -> !p.isDeleted())
+                .orElseThrow(() -> new ResourceNotFoundException(MessageCode.POST_NOT_FOUND));
+        if (canView(viewerId, post)) return post;
+        throw new ResourceNotFoundException(MessageCode.POST_NOT_FOUND);
+    }
+
+    private boolean canView(Long viewerId, Post post) {
+        if (post.getAuthorId().equals(viewerId)) return true;
+        return switch (post.getVisibility()) {
+            case "public" -> true;
+            case "followers" -> followRepository
+                    .findByFollowerIdAndFolloweeId(viewerId, post.getAuthorId())
+                    .isPresent();
+            default -> false;  // 'private' — only the author (handled above)
+        };
     }
 
     // ── helpers ───────────────────────────────────────────────────────────
